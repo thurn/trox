@@ -1,0 +1,10 @@
+{
+  "name": "trox-workspace",
+  "private": true,
+  "scripts": {
+    "build": "npm --workspace @trox/runtime run build",
+    "test": "npm --workspace @trox/runtime test",
+    "typecheck": "npm --workspace @trox/runtime run typecheck"
+  },
+  "workspaces": ["packages/*"]
+}

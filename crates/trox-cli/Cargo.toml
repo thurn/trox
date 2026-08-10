@@ -1,0 +1,37 @@
+[package]
+name = "trox-cli"
+description = "Fast source extractor and localization workflow CLI for Trox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+documentation = "https://docs.rs/trox-cli"
+readme = "../../README.md"
+
+[[bin]]
+name = "trox"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+blake3.workspace = true
+clap.workspace = true
+csv.workspace = true
+data-encoding.workspace = true
+globset.workspace = true
+indexmap.workspace = true
+libc.workspace = true
+rayon.workspace = true
+regex.workspace = true
+ron.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+trox = { version = "=0.1.0", path = "../trox" }
+unicode-normalization.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+pretty_assertions = "1.4"

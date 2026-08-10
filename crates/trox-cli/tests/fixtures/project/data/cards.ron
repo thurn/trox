@@ -1,0 +1,4 @@
+[
+    (id: "radiant-echo", name: Tx(text: "Radiant Echo")),
+    (id: "close", label: Tx(text: "Close deck browser", description: "Accessible button label that closes the deck browser.")),
+]

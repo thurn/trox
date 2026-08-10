@@ -1,0 +1,24 @@
+(
+    source_locale: "en-US",
+    terms: "terms.ron",
+    source_bundle: "generated/bundles/en-US.trox.json",
+    source_report: "generated/locales/en-US.csv",
+    sources: [
+        (language: Rust, include: ["src/**/*.rs"]),
+        (language: TypeScript, include: ["web/**/*.ts", "web/**/*.tsx"]),
+        (language: Ron, include: ["data/**/*.ron"]),
+    ],
+    locales: {
+        "ar": (profile: "locales/ar.ron", csv: "generated/locales/ar.csv", bundle: "generated/bundles/ar.trox.json"),
+        "es": (profile: "locales/es.ron", csv: "generated/locales/es.csv", bundle: "generated/bundles/es.trox.json"),
+        "ja": (profile: "locales/ja.ron", csv: "generated/locales/ja.csv", bundle: "generated/bundles/ja.trox.json"),
+        "ru": (profile: "locales/ru.ron", csv: "generated/locales/ru.csv", bundle: "generated/bundles/ru.trox.json"),
+    },
+    term_forms: {
+        "counted": (description: "Game noun inflected for an explicit cardinal count.", number: Required),
+        "indefinite": (description: "Nonspecific singular game noun phrase.", source_fallback: Default),
+    },
+    ron_description_defaults: {
+        "data/**/*.ron": "Static player-facing Quest authored content.",
+    },
+)
