@@ -42,12 +42,29 @@ fn scan_tsx(source: &str) -> ScanResult {
 fn extracts_equivalent_static_languages() {
     let rust = scan(r#"tx("Close", "Button label.")"#, Language::Rust);
     let ts = scan(r#"tx("Close", "Button label.")"#, Language::TypeScript);
-    let ron = scan(r#"label: Tx(text: "Close")"#, Language::Ron);
+    let ron = scan(r#"label: Tx("Close")"#, Language::Ron);
     assert!(rust.diagnostics.is_empty());
     assert!(ts.diagnostics.is_empty());
     assert!(ron.diagnostics.is_empty());
     assert_eq!(rust.messages[0].entry_id, ts.messages[0].entry_id);
     assert_eq!(rust.messages[0].entry_id, ron.messages[0].entry_id);
+}
+
+#[test]
+fn extracts_short_and_named_ron_tx_forms_equivalently() {
+    let short = scan(r#"label: Tx("Hello")"#, Language::Ron);
+    let short_with_comma = scan(r##"label: Tx(r#"Hello"#,)"##, Language::Ron);
+    let named = scan(r#"label: Tx(text: "Hello")"#, Language::Ron);
+
+    for result in [&short, &short_with_comma, &named] {
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.messages.len(), 1);
+    }
+    assert_eq!(short.messages[0].entry_id, named.messages[0].entry_id);
+    assert_eq!(
+        short_with_comma.messages[0].entry_id,
+        named.messages[0].entry_id
+    );
 }
 
 #[test]

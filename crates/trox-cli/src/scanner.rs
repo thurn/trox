@@ -350,6 +350,13 @@ fn parse_ron_tx(
     cursor: &mut Cursor<'_>,
     default_description: Option<&str>,
 ) -> ParseResult<ParsedCall> {
+    if cursor.peek_literal_start() {
+        let text = cursor.parse_string()?.decoded;
+        cursor.optional_trailing_comma();
+        cursor.expect_char(')')?;
+        return finish_ron_tx(cursor, text, None, None, default_description);
+    }
+
     let mut text = None;
     let mut description = None;
     let mut meaning = None;
@@ -391,6 +398,16 @@ fn parse_ron_tx(
         rule: "trox.ron-missing-text",
         message: "Tx requires `text`".into(),
     })?;
+    finish_ron_tx(cursor, text, description, meaning, default_description)
+}
+
+fn finish_ron_tx(
+    cursor: &mut Cursor<'_>,
+    text: String,
+    description: Option<String>,
+    meaning: Option<String>,
+    default_description: Option<&str>,
+) -> ParseResult<ParsedCall> {
     let placeholders = parse_placeholders(&text).map_err(|message| ParseError {
         offset: cursor.index,
         rule: "trox.invalid-placeholder",

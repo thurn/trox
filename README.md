@@ -584,9 +584,7 @@ RON is limited to flat static messages:
 ```ron
 (
     internal_id: "close-deck-browser",
-    label: Tx(
-        text: "Close deck browser",
-    ),
+    label: Tx("Close deck browser"),
     accessibility_label: Tx(
         text: "Close deck browser",
         description: "Accessible label that closes the browser.",
@@ -602,19 +600,20 @@ RON is limited to flat static messages:
 Rules:
 
 - Only `Tx` records are extracted.
-- `text` is required.
+- Use the short `Tx("text")` form for plain static text.
+- Use the named form when supplying `description` or `meaning`; `text` is
+  required.
 - `description` and `meaning` are optional named fields.
 - Unwrapped strings are ignored.
 - Placeholders and selectors are rejected.
 - Argument maps, terms, and opaque values are rejected.
 - `{{` and `}}` render visible braces.
 
-Rejected forms:
+Rejected by source extraction:
 
 ```ron
 (
     ignored: "Close deck browser",
-    tuple_style: Tx("Close deck browser"),
     placeholder: Tx(text: "Deck: {deck_name}"),
 )
 ```
@@ -651,9 +650,9 @@ let decoded: Record = ron::from_str(&encoded)?;
 assert_eq!(decoded, record);
 ```
 
-This application-data representation is separate from the named-field source
-extraction syntax above. It supports only flat static values. A value without a
-meaning serializes as `Tx("Foo")`; a value with a meaning uses the named form
+This application-data representation uses the same `Tx` forms as source
+extraction. It supports only flat static values. A value without a meaning
+serializes as `Tx("Foo")`; a value with a meaning uses the named form
 `Tx(text: "Open", meaning: "open-state")` so the meaning survives the round
 trip. Dynamic patterns, arguments, and selectors return a serialization error.
 
