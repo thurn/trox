@@ -2,6 +2,20 @@
 
 use super::*;
 
+fn translator_description(description: &str, meaning: Option<&str>, conditions: &str) -> String {
+    let mut sections = Vec::new();
+    if let Some(meaning) = meaning {
+        sections.push(format!("Meaning: {meaning}"));
+    }
+    if !description.is_empty() {
+        sections.push(description.to_owned());
+    }
+    if !conditions.is_empty() {
+        sections.push(format!("Conditions: {conditions}"));
+    }
+    sections.join("\n\n")
+}
+
 fn ensure_structural_cap(config: &ProjectConfig, entry_id: &str, rows: usize) -> Result<()> {
     if rows > config.max_expanded_rows_per_entry {
         bail!(
@@ -191,7 +205,7 @@ fn expand_message(
         .cloned()
         .collect::<Vec<_>>()
         .join("; ");
-    let description = entry
+    let authored_description = entry
         .descriptions
         .iter()
         .cloned()
@@ -219,10 +233,16 @@ fn expand_message(
             });
             let source_revision =
                 revision_id(&revision).map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            let conditions = leaf.conditions.join("; ");
+            let description = translator_description(
+                &authored_description,
+                entry.identity.meaning.as_deref(),
+                &conditions,
+            );
             Ok(ExpectedRow {
-                conditions: leaf.conditions.join("; "),
+                conditions,
                 english: leaf.english,
-                description: description.clone(),
+                description,
                 placeholders: placeholders.clone(),
                 entry_id: entry.entry_id.clone(),
                 row_id,
@@ -673,10 +693,11 @@ impl TermRowContext<'_> {
         } else {
             super::TermRowDescriptor::Scalar { form: form.into() }
         });
+        let description = translator_description(description, None, &conditions);
         Ok(ExpectedRow {
             conditions,
             english: english.into(),
-            description: description.into(),
+            description,
             placeholders: String::new(),
             entry_id: self.entry_id.into(),
             row_id,

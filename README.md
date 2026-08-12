@@ -279,7 +279,8 @@ fn open_state() -> LocalizedString {
 ```
 
 The meaning key changes message identity. It is not an arbitrary developer
-message ID.
+message ID. Extraction includes it at the start of the translator-facing
+description as `Meaning: <key>`.
 
 ### Cardinal selection
 
@@ -876,25 +877,27 @@ Extraction preserves:
 - Translator notes.
 - Unknown workflow columns.
 - Previous translations for changed rows.
-- Removed rows as obsolete records.
+- Removed rows as obsolete records in target-locale CSVs.
 
 Row state:
 
 - New untranslated rows are missing.
 - Translator-relevant source changes make rows stale.
-- Removed source or expansion rows become obsolete.
-- Nothing is deleted until explicit pruning.
+- Removed source or expansion rows become obsolete in target-locale CSVs.
+- Obsolete rows are removed automatically from the English source report; target
+  CSVs retain them until explicit pruning.
 
 Representative translator-facing CSV columns (managed metadata follows):
 
 ```csv
-english,description,translation,conditions
-{count} card,Card count label.,,count.plural=one
-{count} cards,Card count label.,,count.plural=other
+english,description,translation
+{count} card,"Card count label.\n\nConditions: count.plural=one",
+{count} cards,"Card count label.\n\nConditions: count.plural=other",
 ```
 
-Managed IDs and condition columns are tool-owned. Translators edit surface text
-and notes, not selectors.
+Managed IDs are tool-owned. Selector conditions are included in the description
+so translators can read all source context in one column; translators edit
+surface text and notes, not selectors.
 
 Condition examples:
 
@@ -910,9 +913,9 @@ An exact translation cell containing `^` inherits the resolved translation
 from the immediately preceding active row of the same entry:
 
 ```csv
-conditions,translation
-subtype.gender=masculine,Crear {count} Guerrero.
-subtype.gender=feminine,^
+description,translation
+"Conditions: subtype.gender=masculine",Crear {count} Guerrero.
+"Conditions: subtype.gender=feminine",^
 ```
 
 Caret rules:

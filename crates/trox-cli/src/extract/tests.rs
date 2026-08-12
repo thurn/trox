@@ -122,6 +122,61 @@ fn select_conditions_display_only_the_labels_for_the_selected_branch() {
 
     assert_eq!(rows[1].conditions, "choice.select[0]=first-rust | first-ts");
     assert_eq!(rows[2].conditions, "choice.select[1]=second");
+    assert_eq!(
+        rows[1].description,
+        "Conditions: choice.select[0]=first-rust | first-ts"
+    );
+    assert_eq!(
+        rows[0].description,
+        "Conditions: choice.select[2]=otherwise"
+    );
+}
+
+#[test]
+fn message_meaning_is_included_in_the_translator_description() {
+    let config = config_with_number_fallback();
+    let entry = MessageEntry {
+        entry_id: "tx1_test".into(),
+        source_signature: "signature".into(),
+        identity: IdentityDescriptor {
+            identity_version: 1,
+            meaning: Some("open-action".into()),
+            pattern: Pattern::Text {
+                text: "Open".into(),
+            },
+        },
+        descriptions: BTreeSet::from([
+            "Button label that opens a deck.".into(),
+            "Shown in the deck browser.".into(),
+        ]),
+        arguments: BTreeMap::new(),
+        term_reachability: BTreeMap::new(),
+        selector_labels: BTreeMap::new(),
+        predicate_labels: BTreeMap::new(),
+        locations: BTreeSet::new(),
+        context_revision: "revision".into(),
+    };
+    let model = CatalogModel {
+        messages: BTreeMap::from([("tx1_test".into(), entry)]),
+        terms: BTreeMap::new(),
+        source_locale_data: locale_data("en-US"),
+        bytes_scanned: 0,
+        files_scanned: 0,
+    };
+
+    let rows = expand_rows(
+        &config,
+        &model,
+        "en-US",
+        &profile(),
+        &mut Diagnostics::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        rows[0].description,
+        "Meaning: open-action\n\nButton label that opens a deck.\n\nShown in the deck browser."
+    );
 }
 
 #[test]

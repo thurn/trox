@@ -11,7 +11,22 @@ use crate::diagnostic::{Diagnostic, DiagnosticResultExt, Diagnostics, Span};
 use crate::extract::ExpectedRow;
 use crate::scanner::parse_placeholders;
 
-pub const MANAGED_COLUMNS: [&str; 13] = [
+pub const MANAGED_COLUMNS: [&str; 12] = [
+    "english",
+    "description",
+    "translation",
+    "status",
+    "translator_note",
+    "placeholders",
+    "entry_id",
+    "row_id",
+    "kind",
+    "previous_translation",
+    "source_locations",
+    "source_revision",
+];
+
+const LEGACY_MANAGED_COLUMNS: [&str; 13] = [
     "english",
     "description",
     "translation",
@@ -47,24 +62,39 @@ pub struct CsvRow {
 }
 
 impl CsvRow {
-    fn from_record(record: &StringRecord, extras: usize, source_line: usize) -> Self {
+    fn from_record(
+        record: &StringRecord,
+        extras: usize,
+        source_line: usize,
+        legacy_conditions_column: bool,
+    ) -> Self {
         let get = |index| record.get(index).unwrap_or("").to_owned();
+        let offset = usize::from(legacy_conditions_column);
+        let conditions = legacy_conditions_column.then(|| get(3)).unwrap_or_default();
+        let mut description = get(1);
+        if !conditions.is_empty() {
+            if !description.is_empty() {
+                description.push_str("\n\n");
+            }
+            description.push_str("Conditions: ");
+            description.push_str(&conditions);
+        }
         Self {
             english: get(0),
-            description: get(1),
+            description,
             translation: get(2),
-            conditions: get(3),
-            status: get(4),
-            translator_note: get(5),
-            placeholders: get(6),
-            entry_id: get(7),
-            row_id: get(8),
-            kind: get(9),
-            previous_translation: get(10),
-            source_locations: get(11),
-            source_revision: get(12),
+            conditions,
+            status: get(3 + offset),
+            translator_note: get(4 + offset),
+            placeholders: get(5 + offset),
+            entry_id: get(6 + offset),
+            row_id: get(7 + offset),
+            kind: get(8 + offset),
+            previous_translation: get(9 + offset),
+            source_locations: get(10 + offset),
+            source_revision: get(11 + offset),
             extras: (0..extras)
-                .map(|index| get(MANAGED_COLUMNS.len() + index))
+                .map(|index| get(MANAGED_COLUMNS.len() + offset + index))
                 .collect(),
             source_line: Some(source_line),
         }
@@ -75,7 +105,6 @@ impl CsvRow {
             self.english.as_str(),
             self.description.as_str(),
             self.translation.as_str(),
-            self.conditions.as_str(),
             self.status.as_str(),
             self.translator_note.as_str(),
             self.placeholders.as_str(),
@@ -132,10 +161,16 @@ fn read_csv_impl(path: &Path) -> Result<CsvDocument> {
         .headers()
         .with_context(|| format!("invalid CSV header in {}", path.display()))?
         .clone();
-    if headers.len() < MANAGED_COLUMNS.len() {
+    let legacy_conditions_column = headers.get(3) == Some("conditions");
+    let managed_columns: &[&str] = if legacy_conditions_column {
+        &LEGACY_MANAGED_COLUMNS
+    } else {
+        &MANAGED_COLUMNS
+    };
+    if headers.len() < managed_columns.len() {
         bail!("{} is missing managed columns", path.display());
     }
-    for (index, expected) in MANAGED_COLUMNS.iter().enumerate() {
+    for (index, expected) in managed_columns.iter().enumerate() {
         if headers.get(index) != Some(expected) {
             bail!(
                 "{} column {} must be `{expected}`",
@@ -146,7 +181,7 @@ fn read_csv_impl(path: &Path) -> Result<CsvDocument> {
     }
     let extra_headers: Vec<_> = headers
         .iter()
-        .skip(MANAGED_COLUMNS.len())
+        .skip(managed_columns.len())
         .map(str::to_owned)
         .collect();
     let mut unique = BTreeSet::new();
@@ -159,7 +194,14 @@ fn read_csv_impl(path: &Path) -> Result<CsvDocument> {
         .records()
         .enumerate()
         .map(|(index, record)| {
-            record.map(|record| CsvRow::from_record(&record, extra_headers.len(), index + 2))
+            record.map(|record| {
+                CsvRow::from_record(
+                    &record,
+                    extra_headers.len(),
+                    index + 2,
+                    legacy_conditions_column,
+                )
+            })
         })
         .collect::<std::result::Result<Vec<_>, _>>()
         .with_context(|| format!("malformed CSV in {}", path.display()))?;
@@ -350,18 +392,20 @@ fn synchronize_impl(
         rows.push(row);
         prior_new_id = Some(expected.row_id.clone());
     }
-    let mut obsolete: Vec<_> = old
-        .rows
-        .into_iter()
-        .filter(|row| !expected_ids.contains(row.row_id.as_str()))
-        .collect();
-    for row in &mut obsolete {
-        row.status = "obsolete".into();
+    if !source_report {
+        let mut obsolete: Vec<_> = old
+            .rows
+            .into_iter()
+            .filter(|row| !expected_ids.contains(row.row_id.as_str()))
+            .collect();
+        for row in &mut obsolete {
+            row.status = "obsolete".into();
+        }
+        obsolete.sort_by(|left, right| {
+            (&left.entry_id, &left.row_id).cmp(&(&right.entry_id, &right.row_id))
+        });
+        rows.extend(obsolete);
     }
-    obsolete.sort_by(|left, right| {
-        (&left.entry_id, &left.row_id).cmp(&(&right.entry_id, &right.row_id))
-    });
-    rows.extend(obsolete);
     derive_statuses(&mut rows, source_report)?;
     lint_rows(path, &rows, diagnostics, source_report)?;
     let document = CsvDocument {
@@ -608,6 +652,31 @@ mod tests {
     }
 
     #[test]
+    fn legacy_conditions_column_migrates_into_description() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("es.csv");
+        fs::write(
+            &path,
+            concat!(
+                "english,description,translation,conditions,status,translator_note,placeholders,entry_id,row_id,kind,previous_translation,source_locations,source_revision,reviewer\n",
+                "Hello {name},Greeting.,Hola {name},count.plural=one,translated,Keep it.,name,tx1_a,row1_a,message,,a.ts:1:1,rev1_same,Ada\n"
+            ),
+        )
+        .unwrap();
+
+        let document = read_csv(&path).unwrap();
+        let row = &document.rows[0];
+        assert_eq!(row.description, "Greeting.\n\nConditions: count.plural=one");
+        assert_eq!(row.translation, "Hola {name}");
+        assert_eq!(row.translator_note, "Keep it.");
+        assert_eq!(row.extras, ["Ada"]);
+
+        let output = String::from_utf8(write_csv(&document).unwrap()).unwrap();
+        assert!(output.starts_with("english,description,translation,status,"));
+        assert!(!output.lines().next().unwrap().contains("conditions"));
+    }
+
+    #[test]
     fn source_revision_stales_without_losing_work() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("es.csv");
@@ -622,6 +691,32 @@ mod tests {
         assert_eq!(second.document.rows[0].status, "stale");
         assert_eq!(second.document.rows[0].previous_translation, "Hola {name}");
         assert!(second.document.rows[0].translation.is_empty());
+    }
+
+    #[test]
+    fn source_report_drops_obsolete_rows_during_synchronization() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("en-US.csv");
+        let mut diagnostics = Diagnostics::default();
+        let initial = [
+            expected_id("row1_a", "rev1_same"),
+            expected_id("row1_b", "rev1_same"),
+        ];
+        let first = synchronize(&path, &initial, true, &mut diagnostics).unwrap();
+        fs::write(&path, first.bytes).unwrap();
+
+        let current = [expected_id("row1_a", "rev1_same")];
+        let synchronized = synchronize(&path, &current, true, &mut diagnostics).unwrap();
+
+        assert_eq!(synchronized.document.rows.len(), 1);
+        assert_eq!(synchronized.document.rows[0].row_id, "row1_a");
+        assert!(
+            synchronized
+                .document
+                .rows
+                .iter()
+                .all(|row| row.status != "obsolete")
+        );
     }
 
     #[test]

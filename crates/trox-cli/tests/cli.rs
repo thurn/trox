@@ -177,7 +177,7 @@ fn locale_init_atomically_scaffolds_profile_and_target_csv() {
     let profile_text = fs::read_to_string(profile).unwrap();
     assert!(profile_text.contains("Advisory:"));
     let csv = fs::read_to_string(fixture.path().join("locales/es.csv")).unwrap();
-    assert!(csv.starts_with("english,description,translation,conditions,status,"));
+    assert!(csv.starts_with("english,description,translation,status,"));
     assert!(csv.lines().count() > 1);
 }
 
