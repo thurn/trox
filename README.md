@@ -133,7 +133,7 @@ use trox::prelude::*;
 It exports:
 
 - `LocalizedString`, `Localizer`, and `TermId`.
-- `tx`, `txa`, `meaning`, `localization_todo`, and `tx_args!`.
+- `tx`, `txa`, `meaning`, `assert_localized`, and `tx_args!`.
 - `plural`, `ordinal`, and `select`.
 - `exact`, `zero`, `one`, `two`, `few`, `many`, and `other`.
 - `when`, `otherwise`, and `TroxSelector`.
@@ -160,21 +160,29 @@ let value: LocalizedString = close_label();
 let text: String = localizer.resolve(&value);
 ```
 
-### Unlocalized migration text
+### Intentionally untranslated text
 
-Use `localization_todo` to move a runtime string through APIs that require a
-`LocalizedString` before that text has been properly localized:
+Use `assert_localized` when runtime text is intentionally safe to display
+without translation:
 
 ```rust
-fn legacy_label(raw_string: &str) -> LocalizedString {
-    localization_todo(raw_string)
+fn player_name(raw_string: &str) -> LocalizedString {
+    assert_localized(raw_string)
 }
 ```
 
-The extractor deliberately ignores these calls. The value resolves to the raw
-text in every locale, including text containing braces. Replace each use with
-`tx` or `txa` as the localization work is completed. A camel-case
-`localizationTodo` alias is also available for cross-language API parity.
+Appropriate uses are:
+
+- Migrations, while existing text is being moved behind `LocalizedString` APIs.
+- Raw user input that must be displayed verbatim, such as a player name.
+- Tests that need a lightweight `LocalizedString` value.
+- Developer-only surfaces whose text is not translated.
+
+The function name makes the assertion explicit: this text does not need
+translation at this call site. Do not use it for ordinary user-facing product
+copy. The extractor deliberately ignores these calls, and the value resolves to
+the supplied text in every locale, including text containing braces. Replace
+migration uses with `tx` or `txa` as localization work is completed.
 
 ### Interpolation
 
@@ -489,7 +497,7 @@ import {
   exact,
   few,
   indefinite,
-  localizationTodo,
+  assertLocalized,
   one,
   opaque,
   ordinal,
@@ -526,15 +534,19 @@ export function deckLabel(deck_name: string): LocalizedString {
 }
 ```
 
-For unlocalized migration text, `localizationTodo(rawString)` returns a
-`LocalizedString` that resolves to `rawString` in every locale. It is not
-extracted; replace it with `tx` or `txa` when the text is ready for translation:
+Use `assertLocalized(rawString)` for migrations, verbatim user input, tests, and
+developer-only surfaces. It returns a `LocalizedString` that resolves to
+`rawString` in every locale and is deliberately not extracted:
 
 ```ts
-export function legacyLabel(rawString: string): LocalizedString {
-  return localizationTodo(rawString);
+export function playerName(rawString: string): LocalizedString {
+  return assertLocalized(rawString);
 }
 ```
+
+Calling it asserts that the text does not need translation at that call site;
+do not use it for ordinary user-facing product copy. Replace migration uses
+with `tx` or `txa` as localization work is completed.
 
 The argument object must be inline. Spreads and prebuilt objects are not
 extractable.

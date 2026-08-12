@@ -89,14 +89,14 @@ tx("Yes", "Actual label.");"#,
 }
 
 #[test]
-fn ignores_localization_todo_calls() {
+fn ignores_assert_localized_calls() {
     for (source, language) in [
         (
-            r#"localization_todo("Not extracted {raw} text")"#,
+            r#"assert_localized("Not extracted {raw} text")"#,
             Language::Rust,
         ),
         (
-            r#"localizationTodo("Not extracted {raw} text")"#,
+            r#"assertLocalized("Not extracted {raw} text")"#,
             Language::TypeScript,
         ),
     ] {

@@ -8,7 +8,7 @@ export {
   few,
   indefinite,
   many,
-  localizationTodo,
+  assertLocalized,
   meaning,
   one,
   opaque,

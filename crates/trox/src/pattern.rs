@@ -10,7 +10,7 @@ use crate::model::{
 use crate::value::LocalizedStringWire;
 use crate::{Argument, LocalizedString};
 
-pub(crate) const LOCALIZATION_TODO_MEANING: &str = "trox.localization-todo";
+pub(crate) const ASSERT_LOCALIZED_MEANING: &str = "trox.assert-localized";
 
 /// A fully owned pattern under construction.
 #[derive(Debug, Clone)]
@@ -400,26 +400,24 @@ pub fn tx_owned(
     )
 }
 
-/// Wraps unlocalized runtime text in a [`LocalizedString`] without extracting it.
+/// Asserts that runtime text is appropriate to display without translation.
 ///
-/// This is a migration escape hatch for text that still needs proper
-/// localization. The returned value always resolves to `raw_string`, in every
-/// locale, and calls to this function are deliberately ignored by source
-/// extraction.
-#[doc(alias = "localizationTodo")]
-pub fn localization_todo(raw_string: impl AsRef<str>) -> LocalizedString {
+/// Use this explicit escape hatch for migrations, raw user input, tests, and
+/// developer-only surfaces. The returned value always resolves to `raw_string`
+/// in every locale, and calls are deliberately ignored by source extraction.
+pub fn assert_localized(raw_string: impl AsRef<str>) -> LocalizedString {
     let normalized: String = raw_string.as_ref().nfc().collect();
     let escaped = normalized.replace('{', "{{").replace('}', "}}");
     LocalizedString::build(
         IdentityDescriptor {
             identity_version: 1,
-            meaning: Some(LOCALIZATION_TODO_MEANING.to_owned()),
+            meaning: Some(ASSERT_LOCALIZED_MEANING.to_owned()),
             pattern: Pattern::Text { text: escaped },
         },
         BTreeMap::new(),
         vec![],
     )
-    .expect("normalized localization TODO text is always a valid atomic pattern")
+    .expect("normalized asserted-localized text is always a valid atomic pattern")
 }
 
 fn build(pattern: PatternValue, arguments: BTreeMap<String, Argument>) -> LocalizedString {

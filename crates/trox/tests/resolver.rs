@@ -108,10 +108,8 @@ fn scalar_term(text: &str) -> BundleTermForm {
 }
 
 #[test]
-fn localization_todo_resolves_raw_text_without_catalog_entries() {
-    let value = localization_todo("Runtime {name} / } / e\u{301}");
-    let camel_case_alias = localizationTodo("Runtime {name} / } / e\u{301}");
-    assert_eq!(value, camel_case_alias);
+fn assert_localized_resolves_raw_text_without_catalog_entries() {
+    let value = assert_localized("Runtime {name} / } / e\u{301}");
     assert!(value.is_atomic());
 
     let source = bundle("en-US");

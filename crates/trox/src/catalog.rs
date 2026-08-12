@@ -86,7 +86,7 @@ impl SourceCatalog {
     ///
     /// Unknown messages, forms, and incompatible numbered-term contracts are
     /// rejected before a [`LocalizedString`] is returned. The reserved,
-    /// catalog-independent wire shape produced by [`crate::localization_todo`]
+    /// catalog-independent wire shape produced by [`crate::assert_localized`]
     /// is the sole exception.
     pub fn localized_string_from_json(
         &self,
@@ -116,7 +116,7 @@ impl SourceCatalog {
                 "identity hash does not match wire IDs".into(),
             ));
         }
-        if wire.identity.meaning.as_deref() == Some(crate::pattern::LOCALIZATION_TODO_MEANING) {
+        if wire.identity.meaning.as_deref() == Some(crate::pattern::ASSERT_LOCALIZED_MEANING) {
             let value = LocalizedString::build_with_known_ids(
                 wire.identity,
                 wire.arguments,
@@ -125,11 +125,11 @@ impl SourceCatalog {
                 wire.source_signature,
             )
             .map_err(|error| DeserializeError::InvalidValue(error.to_string()))?;
-            if value.is_localization_todo() {
+            if value.is_asserted_localized() {
                 return Ok(value);
             }
             return Err(DeserializeError::Unauthorized(
-                "invalid localization TODO value".into(),
+                "invalid asserted-localized value".into(),
             ));
         }
         let Some(authorized) = self.entries.get(&entry_id) else {

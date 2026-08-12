@@ -7,9 +7,9 @@ import { assertDictionary, assertObjectKeys, deserializeBoundary, ownValue, pars
 import {
   CATEGORIES,
   CONSTRUCTION_TOKEN,
-  LOCALIZATION_TODO_MEANING,
+  ASSERT_LOCALIZED_MEANING,
   LocalizedString,
-  localizationTodoPattern,
+  assertedLocalizedPattern,
   PLACEHOLDER,
   assertNfc,
   assertSelectorInteger,
@@ -153,10 +153,10 @@ export class SourceCatalog {
       if (entryId !== wire.entry_id || signature !== wire.source_signature) {
         throw new TroxDeserializeError("trox.identity-mismatch", "wire identity hash mismatch");
       }
-      if (wire.identity.meaning === LOCALIZATION_TODO_MEANING) {
-        const todo = LocalizedString.fromValidatedWire(wire, CONSTRUCTION_TOKEN);
-        if (localizationTodoPattern(todo) !== undefined) return todo;
-        throw new TroxDeserializeError("trox.unauthorized-entry", "invalid localization TODO value");
+      if (wire.identity.meaning === ASSERT_LOCALIZED_MEANING) {
+        const asserted = LocalizedString.fromValidatedWire(wire, CONSTRUCTION_TOKEN);
+        if (assertedLocalizedPattern(asserted) !== undefined) return asserted;
+        throw new TroxDeserializeError("trox.unauthorized-entry", "invalid asserted-localized value");
       }
       const authorized = ownValue(this.#entries, entryId);
       if (authorized?.source_signature !== signature || canonicalJson(authorized.identity) !== canonicalJson(wire.identity)) {
@@ -235,14 +235,14 @@ export class Localizer {
   get sourceCatalog(): SourceCatalog { return this.#catalog; }
   localizedStringFromJSON(input: string): LocalizedString { return this.#catalog.localizedStringFromJSON(input); }
   resolveChecked(value: LocalizedString): string {
-    const todoPattern = localizationTodoPattern(value);
-    if (todoPattern !== undefined) return this.interpolate(todoPattern, value, false);
+    const assertedPattern = assertedLocalizedPattern(value);
+    if (assertedPattern !== undefined) return this.interpolate(assertedPattern, value, false);
     const row = this.targetRow(value);
     return this.interpolate(row.translation, value, true);
   }
   resolve(value: LocalizedString): string {
-    const todoPattern = localizationTodoPattern(value);
-    if (todoPattern !== undefined) return this.interpolateRecovering(todoPattern, value);
+    const assertedPattern = assertedLocalizedPattern(value);
+    if (assertedPattern !== undefined) return this.interpolateRecovering(assertedPattern, value);
     try { return this.interpolateRecovering(this.targetRow(value).translation, value, true); }
     catch (error) {
       this.emit(error, value.entryId);

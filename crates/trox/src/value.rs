@@ -9,7 +9,7 @@ use crate::model::{
     Argument, IdentityDescriptor, IntoArgument, Pattern, SelectorRecord, Version,
     validate_arguments, validate_identity, validate_selectors,
 };
-use crate::pattern::LOCALIZATION_TODO_MEANING;
+use crate::pattern::ASSERT_LOCALIZED_MEANING;
 use crate::{SerializeError, TroxValueError};
 
 /// Canonical serialized representation of a [`LocalizedString`].
@@ -194,20 +194,20 @@ impl LocalizedString {
             && self.data.selectors.is_empty()
     }
 
-    pub(crate) fn is_localization_todo(&self) -> bool {
-        self.data.identity.meaning.as_deref() == Some(LOCALIZATION_TODO_MEANING)
+    pub(crate) fn is_asserted_localized(&self) -> bool {
+        self.data.identity.meaning.as_deref() == Some(ASSERT_LOCALIZED_MEANING)
             && matches!(self.data.identity.pattern, Pattern::Text { .. })
             && self.data.arguments.is_empty()
             && self.data.selectors.is_empty()
     }
 
-    pub(crate) fn localization_todo_pattern(&self) -> Option<&str> {
-        if !self.is_localization_todo() {
+    pub(crate) fn asserted_localized_pattern(&self) -> Option<&str> {
+        if !self.is_asserted_localized() {
             return None;
         }
         match &self.data.identity.pattern {
             Pattern::Text { text } => Some(text),
-            _ => unreachable!("localization TODO values always contain text patterns"),
+            _ => unreachable!("asserted-localized values always contain text patterns"),
         }
     }
 
