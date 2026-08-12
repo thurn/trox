@@ -12,11 +12,11 @@ use crate::extract::ExpectedRow;
 use crate::scanner::parse_placeholders;
 
 pub const MANAGED_COLUMNS: [&str; 13] = [
-    "conditions",
     "english",
-    "translation",
-    "status",
     "description",
+    "translation",
+    "conditions",
+    "status",
     "translator_note",
     "placeholders",
     "entry_id",
@@ -29,11 +29,11 @@ pub const MANAGED_COLUMNS: [&str; 13] = [
 
 #[derive(Debug, Clone, Default)]
 pub struct CsvRow {
-    pub conditions: String,
     pub english: String,
-    pub translation: String,
-    pub status: String,
     pub description: String,
+    pub translation: String,
+    pub conditions: String,
+    pub status: String,
     pub translator_note: String,
     pub placeholders: String,
     pub entry_id: String,
@@ -50,11 +50,11 @@ impl CsvRow {
     fn from_record(record: &StringRecord, extras: usize, source_line: usize) -> Self {
         let get = |index| record.get(index).unwrap_or("").to_owned();
         Self {
-            conditions: get(0),
-            english: get(1),
+            english: get(0),
+            description: get(1),
             translation: get(2),
-            status: get(3),
-            description: get(4),
+            conditions: get(3),
+            status: get(4),
             translator_note: get(5),
             placeholders: get(6),
             entry_id: get(7),
@@ -72,11 +72,11 @@ impl CsvRow {
 
     fn record(&self) -> Vec<&str> {
         let mut result = vec![
-            self.conditions.as_str(),
             self.english.as_str(),
-            self.translation.as_str(),
-            self.status.as_str(),
             self.description.as_str(),
+            self.translation.as_str(),
+            self.conditions.as_str(),
+            self.status.as_str(),
             self.translator_note.as_str(),
             self.placeholders.as_str(),
             self.entry_id.as_str(),

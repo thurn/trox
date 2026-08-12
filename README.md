@@ -846,12 +846,12 @@ Row state:
 - Removed source or expansion rows become obsolete.
 - Nothing is deleted until explicit pruning.
 
-Representative CSV:
+Representative translator-facing CSV columns (managed metadata follows):
 
 ```csv
-entry_id,row_id,conditions,source,translation,status
-tx1_ab,txr1_01,count.plural=one,{count} card,,missing
-tx1_ab,txr1_02,count.plural=other,{count} cards,,missing
+english,description,translation,conditions
+{count} card,Card count label.,,count.plural=one
+{count} cards,Card count label.,,count.plural=other
 ```
 
 Managed IDs and condition columns are tool-owned. Translators edit surface text
