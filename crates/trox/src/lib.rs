@@ -53,9 +53,12 @@ pub use model::{
     Pattern, PluralCategory, SelectIdentityBranch, SelectorKey, SelectorRecord, TermArgument,
     TermId, TroxInteger, TroxNumber, Version, expansion_row_id, identity_ids, revision_id,
 };
+#[doc(hidden)]
+pub use pattern::localization_todo as localizationTodo;
 pub use pattern::{
-    PatternValue, SelectArm, TroxSelector, counted, exact, few, indefinite, many, meaning, one,
-    opaque, ordinal, other, otherwise, plural, select, term, two, tx, tx_owned, txa, when, zero,
+    PatternValue, SelectArm, TroxSelector, counted, exact, few, indefinite, localization_todo,
+    many, meaning, one, opaque, ordinal, other, otherwise, plural, select, term, two, tx, tx_owned,
+    txa, when, zero,
 };
 pub use ron_adapter::RonTx;
 pub use value::LocalizedString;
@@ -67,9 +70,9 @@ pub use value::LocalizedString;
 /// localization infrastructure.
 pub mod prelude {
     pub use crate::{
-        LocalizedString, Localizer, TermId, TroxSelector, counted, exact, few, indefinite, many,
-        meaning, one, opaque, ordinal, other, otherwise, plural, select, term, two, tx, tx_args,
-        txa, when, zero,
+        LocalizedString, Localizer, TermId, TroxSelector, counted, exact, few, indefinite,
+        localization_todo, localizationTodo, many, meaning, one, opaque, ordinal, other, otherwise,
+        plural, select, term, two, tx, tx_args, txa, when, zero,
     };
 }
 

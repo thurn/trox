@@ -502,6 +502,9 @@ impl Localizer {
 
     /// Resolves only through the target row and returns the first failure.
     pub fn resolve_checked(&self, value: &LocalizedString) -> Result<String, ResolveError> {
+        if let Some(pattern) = value.localization_todo_pattern() {
+            return self.interpolate(pattern, value, false);
+        }
         let row = self.target_row(value)?;
         self.interpolate(&row.translation, value, true)
     }
@@ -531,6 +534,12 @@ impl Localizer {
 
     /// Resolves infallibly, emitting diagnostics and preserving visible recovery markers.
     pub fn resolve(&self, value: &LocalizedString) -> String {
+        if let Some(pattern) = value.localization_todo_pattern() {
+            return self
+                .interpolate_recovering(pattern, value, false)
+                .map(|(text, _)| text)
+                .unwrap_or_else(|_| unreachable!("localization TODO patterns are validated"));
+        }
         match self.target_row(value) {
             Ok(row) => match self.interpolate_recovering(&row.translation, value, true) {
                 Ok((text, _)) => text,
@@ -542,6 +551,16 @@ impl Localizer {
 
     /// Resolves infallibly and reports whether the entire message fell back to source.
     pub fn resolve_outcome(&self, value: &LocalizedString) -> ResolveOutcome {
+        if let Some(pattern) = value.localization_todo_pattern() {
+            let text = self
+                .interpolate_recovering(pattern, value, false)
+                .map(|(text, _)| text)
+                .unwrap_or_else(|_| unreachable!("localization TODO patterns are validated"));
+            return ResolveOutcome {
+                text,
+                used_source_fallback: false,
+            };
+        }
         match self.target_row(value) {
             Ok(row) => match self.interpolate_recovering(&row.translation, value, true) {
                 Ok((text, _used_placeholder_recovery)) => ResolveOutcome {

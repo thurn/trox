@@ -2,11 +2,23 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { blake3 } from "@noble/hashes/blake3.js";
 import {
-  bundleFromCanonicalJSON, canonicalJson, counted, exact, Localizer, meaning, one, ordinal, other, plural, select, SourceCatalog, termId, tx, txa, when, otherwise,
+  bundleFromCanonicalJSON, canonicalJson, counted, exact, localizationTodo, Localizer, meaning, one, ordinal, other, plural, select, SourceCatalog, termId, tx, txa, when, otherwise,
   type Bundle,
 } from "./index.js";
 
 describe("authoring", () => {
+  it("keeps localization TODO text raw and independent of catalogs", () => {
+    const value = localizationTodo("Runtime {name} / } / e\u0301");
+    const source = testBundle("en-US", {});
+    const localizer = new Localizer(testBundle("es", {}), source);
+
+    expect(value.isAtomic()).toBe(true);
+    expect(localizer.resolveChecked(value)).toBe("Runtime {name} / } / é");
+    expect(localizer.resolve(value)).toBe("Runtime {name} / } / é");
+    expect(new SourceCatalog(source).localizedStringFromJSON(value.toCanonicalJSON()).toCanonicalJSON())
+      .toBe(value.toCanonicalJSON());
+  });
+
   it("constructs deterministic identities", () => {
     const first = tx("Close deck browser", "Accessible close button label.");
     const second = tx("Close deck browser", "A different description.");

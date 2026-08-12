@@ -9,6 +9,7 @@ use crate::model::{
     Argument, IdentityDescriptor, IntoArgument, Pattern, SelectorRecord, Version,
     validate_arguments, validate_identity, validate_selectors,
 };
+use crate::pattern::LOCALIZATION_TODO_MEANING;
 use crate::{SerializeError, TroxValueError};
 
 /// Canonical serialized representation of a [`LocalizedString`].
@@ -191,6 +192,23 @@ impl LocalizedString {
         matches!(self.data.identity.pattern, Pattern::Text { .. })
             && self.data.arguments.is_empty()
             && self.data.selectors.is_empty()
+    }
+
+    pub(crate) fn is_localization_todo(&self) -> bool {
+        self.data.identity.meaning.as_deref() == Some(LOCALIZATION_TODO_MEANING)
+            && matches!(self.data.identity.pattern, Pattern::Text { .. })
+            && self.data.arguments.is_empty()
+            && self.data.selectors.is_empty()
+    }
+
+    pub(crate) fn localization_todo_pattern(&self) -> Option<&str> {
+        if !self.is_localization_todo() {
+            return None;
+        }
+        match &self.data.identity.pattern {
+            Pattern::Text { text } => Some(text),
+            _ => unreachable!("localization TODO values always contain text patterns"),
+        }
     }
 
     /// Serializes this value as RFC 8785 canonical JSON.

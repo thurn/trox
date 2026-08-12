@@ -85,7 +85,9 @@ impl SourceCatalog {
     /// Decodes canonical JSON after authorizing its identity and term schemas.
     ///
     /// Unknown messages, forms, and incompatible numbered-term contracts are
-    /// rejected before a [`LocalizedString`] is returned.
+    /// rejected before a [`LocalizedString`] is returned. The reserved,
+    /// catalog-independent wire shape produced by [`crate::localization_todo`]
+    /// is the sole exception.
     pub fn localized_string_from_json(
         &self,
         input: &str,
@@ -112,6 +114,22 @@ impl SourceCatalog {
         if entry_id != wire.entry_id || signature != wire.source_signature {
             return Err(DeserializeError::InvalidValue(
                 "identity hash does not match wire IDs".into(),
+            ));
+        }
+        if wire.identity.meaning.as_deref() == Some(crate::pattern::LOCALIZATION_TODO_MEANING) {
+            let value = LocalizedString::build_with_known_ids(
+                wire.identity,
+                wire.arguments,
+                wire.selectors,
+                wire.entry_id,
+                wire.source_signature,
+            )
+            .map_err(|error| DeserializeError::InvalidValue(error.to_string()))?;
+            if value.is_localization_todo() {
+                return Ok(value);
+            }
+            return Err(DeserializeError::Unauthorized(
+                "invalid localization TODO value".into(),
             ));
         }
         let Some(authorized) = self.entries.get(&entry_id) else {

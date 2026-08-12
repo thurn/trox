@@ -108,6 +108,34 @@ fn scalar_term(text: &str) -> BundleTermForm {
 }
 
 #[test]
+fn localization_todo_resolves_raw_text_without_catalog_entries() {
+    let value = localization_todo("Runtime {name} / } / e\u{301}");
+    let camel_case_alias = localizationTodo("Runtime {name} / } / e\u{301}");
+    assert_eq!(value, camel_case_alias);
+    assert!(value.is_atomic());
+
+    let source = bundle("en-US");
+    let localizer = Localizer::new(bundle("es"), source).unwrap();
+    assert_eq!(
+        localizer.resolve_checked(&value).unwrap(),
+        "Runtime {name} / } / é"
+    );
+    assert_eq!(localizer.resolve(&value), "Runtime {name} / } / é");
+    assert_eq!(
+        localizer.resolve_outcome(&value),
+        trox::ResolveOutcome {
+            text: "Runtime {name} / } / é".to_owned(),
+            used_source_fallback: false,
+        }
+    );
+
+    let decoded = localizer
+        .localized_string_from_json(&value.to_canonical_json().unwrap())
+        .unwrap();
+    assert_eq!(decoded, value);
+}
+
+#[test]
 fn resolves_a_compatible_target_row() {
     let name = "Ada".to_owned();
     let value = txa(

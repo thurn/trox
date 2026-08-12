@@ -7,6 +7,8 @@ export const MAX_SAFE_SELECTOR_INTEGER = 9_007_199_254_740_991;
 const STABLE_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
 export const PLACEHOLDER = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 export const CATEGORIES = ["zero", "one", "two", "few", "many", "other"] as const;
+/** @internal */
+export const LOCALIZATION_TODO_MEANING = "trox.localization-todo";
 export type PluralCategory = (typeof CATEGORIES)[number];
 export type SelectorKey = string | boolean;
 
@@ -266,7 +268,7 @@ export interface LocalizedStringWire {
 export class LocalizedString {
   readonly #wire: LocalizedStringWire;
   private constructor(wire: LocalizedStringWire, token: symbol) {
-    if (token !== CONSTRUCTION_TOKEN) throw new TroxValueError("trox.constructor", "use tx or txa to construct LocalizedString");
+    if (token !== CONSTRUCTION_TOKEN) throw new TroxValueError("trox.constructor", "use tx, txa, or localizationTodo to construct LocalizedString");
     this.#wire = deepFreeze(wire);
     Object.freeze(this);
   }
@@ -305,6 +307,14 @@ export function txa(pattern: PatternInput, inputs: Readonly<Record<string, Argum
   return construct(patternValue(pattern), args, description);
 }
 
+/** Wraps unlocalized runtime text without making it extractable or translatable. */
+export function localizationTodo(rawString: string): LocalizedString {
+  const normalized = typeof rawString === "string" ? rawString.normalize("NFC") : rawString;
+  assertNfc(normalized, "localization TODO text");
+  const text = normalized.replaceAll("{", "{{").replaceAll("}", "}}");
+  return constructValidated({ pattern: { kind: "text", text }, selectors: [], meaning: LOCALIZATION_TODO_MEANING }, {});
+}
+
 function argumentFrom(value: ArgumentInput): Argument {
   if (typeof value === "string") { assertNfc(value, "argument text"); return { kind: "text", value }; }
   if (typeof value === "number") {
@@ -324,6 +334,10 @@ function construct(value: PatternValue, args: Record<string, Argument>, descript
   if (description.trim() === "") throw new TroxValueError("trox.description", "description must not be empty");
   validatePattern(value.pattern);
   validateArgumentMap(value.pattern, args);
+  return constructValidated(value, args);
+}
+
+function constructValidated(value: PatternValue, args: Record<string, Argument>): LocalizedString {
   const identity: IdentityDescriptor = { identity_version: 1, meaning: value.meaning, pattern: value.pattern };
   let digest: Uint8Array | undefined;
   const identityDigest = (): Uint8Array => {
@@ -341,6 +355,16 @@ function construct(value: PatternValue, args: Record<string, Argument>, descript
   } satisfies LocalizedStringWire;
   validateSelectorRecords(wire.identity.pattern, wire.selectors);
   return LocalizedString.fromValidatedWire(wire, CONSTRUCTION_TOKEN);
+}
+
+/** @internal */
+export function localizationTodoPattern(value: LocalizedString): string | undefined {
+  return value.identity.meaning === LOCALIZATION_TODO_MEANING
+    && value.identity.pattern.kind === "text"
+    && Object.keys(value.arguments).length === 0
+    && value.selectors.length === 0
+    ? value.identity.pattern.text
+    : undefined;
 }
 
 export function validateArgumentMap(pattern: Pattern, argumentsValue: Readonly<Record<string, Argument>>): void {

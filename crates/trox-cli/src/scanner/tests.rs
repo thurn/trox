@@ -89,6 +89,24 @@ tx("Yes", "Actual label.");"#,
 }
 
 #[test]
+fn ignores_localization_todo_calls() {
+    for (source, language) in [
+        (
+            r#"localization_todo("Not extracted {raw} text")"#,
+            Language::Rust,
+        ),
+        (
+            r#"localizationTodo("Not extracted {raw} text")"#,
+            Language::TypeScript,
+        ),
+    ] {
+        let result = scan(source, language);
+        assert!(result.messages.is_empty());
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    }
+}
+
+#[test]
 fn reports_sound_source_contract_violations() {
     for (source, rule) in [
         (r#"tx(dynamic, "Description.")"#, "trox.dynamic-pattern"),

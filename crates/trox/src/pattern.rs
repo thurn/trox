@@ -10,6 +10,8 @@ use crate::model::{
 use crate::value::LocalizedStringWire;
 use crate::{Argument, LocalizedString};
 
+pub(crate) const LOCALIZATION_TODO_MEANING: &str = "trox.localization-todo";
+
 /// A fully owned pattern under construction.
 #[derive(Debug, Clone)]
 pub struct PatternValue {
@@ -396,6 +398,28 @@ pub fn tx_owned(
         BTreeMap::new(),
         pattern.selectors,
     )
+}
+
+/// Wraps unlocalized runtime text in a [`LocalizedString`] without extracting it.
+///
+/// This is a migration escape hatch for text that still needs proper
+/// localization. The returned value always resolves to `raw_string`, in every
+/// locale, and calls to this function are deliberately ignored by source
+/// extraction.
+#[doc(alias = "localizationTodo")]
+pub fn localization_todo(raw_string: impl AsRef<str>) -> LocalizedString {
+    let normalized: String = raw_string.as_ref().nfc().collect();
+    let escaped = normalized.replace('{', "{{").replace('}', "}}");
+    LocalizedString::build(
+        IdentityDescriptor {
+            identity_version: 1,
+            meaning: Some(LOCALIZATION_TODO_MEANING.to_owned()),
+            pattern: Pattern::Text { text: escaped },
+        },
+        BTreeMap::new(),
+        vec![],
+    )
+    .expect("normalized localization TODO text is always a valid atomic pattern")
 }
 
 fn build(pattern: PatternValue, arguments: BTreeMap<String, Argument>) -> LocalizedString {

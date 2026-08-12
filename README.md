@@ -133,7 +133,7 @@ use trox::prelude::*;
 It exports:
 
 - `LocalizedString`, `Localizer`, and `TermId`.
-- `tx`, `txa`, `meaning`, and `tx_args!`.
+- `tx`, `txa`, `meaning`, `localization_todo`, and `tx_args!`.
 - `plural`, `ordinal`, and `select`.
 - `exact`, `zero`, `one`, `two`, `few`, `many`, and `other`.
 - `when`, `otherwise`, and `TroxSelector`.
@@ -159,6 +159,22 @@ The final argument is required translator context. The result is not a host
 let value: LocalizedString = close_label();
 let text: String = localizer.resolve(&value);
 ```
+
+### Unlocalized migration text
+
+Use `localization_todo` to move a runtime string through APIs that require a
+`LocalizedString` before that text has been properly localized:
+
+```rust
+fn legacy_label(raw_string: &str) -> LocalizedString {
+    localization_todo(raw_string)
+}
+```
+
+The extractor deliberately ignores these calls. The value resolves to the raw
+text in every locale, including text containing braces. Replace each use with
+`tx` or `txa` as the localization work is completed. A camel-case
+`localizationTodo` alias is also available for cross-language API parity.
 
 ### Interpolation
 
@@ -473,6 +489,7 @@ import {
   exact,
   few,
   indefinite,
+  localizationTodo,
   one,
   opaque,
   ordinal,
@@ -506,6 +523,16 @@ export function deckLabel(deck_name: string): LocalizedString {
     { deck_name },
     "Label followed by the user-defined deck name.",
   );
+}
+```
+
+For unlocalized migration text, `localizationTodo(rawString)` returns a
+`LocalizedString` that resolves to `rawString` in every locale. It is not
+extracted; replace it with `tx` or `txa` when the text is ready for translation:
+
+```ts
+export function legacyLabel(rawString: string): LocalizedString {
+  return localizationTodo(rawString);
 }
 ```
 
