@@ -1,12 +1,20 @@
 use super::*;
 
 fn scan(source: &str, language: Language) -> ScanResult {
+    scan_with_ron_default(source, language, Some("Default description."))
+}
+
+fn scan_with_ron_default(
+    source: &str,
+    language: Language,
+    ron_default_description: Option<&str>,
+) -> ScanResult {
     let mut scanner = Scanner {
         source,
         path: Path::new("fixture"),
         language,
         tsx: false,
-        ron_default_description: Some("Default description."),
+        ron_default_description,
         line_starts: line_starts(source),
         messages: vec![],
         diagnostics: vec![],
@@ -17,6 +25,76 @@ fn scan(source: &str, language: Language) -> ScanResult {
         diagnostics: scanner.diagnostics,
         bytes_scanned: source.len() as u64,
     }
+}
+
+#[test]
+fn captures_ron_field_paths_separately_from_authored_descriptions() {
+    let result = scan_with_ron_default(
+        r#"[
+            CardDefinition(
+                name: Tx("Windcutter"),
+                ability_text: [
+                    Tx("First ability."),
+                    Tx(text: "Second ability.", description: "Authored guidance."),
+                ],
+            ),
+        ]"#,
+        Language::Ron,
+        Some("Default guidance."),
+    );
+
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        result.messages[0].ron_path.as_deref(),
+        Some("CardDefinition.name")
+    );
+    assert_eq!(
+        result.messages[1].ron_path.as_deref(),
+        Some("CardDefinition.ability_text")
+    );
+    assert_eq!(
+        result.messages[2].ron_path.as_deref(),
+        Some("CardDefinition.ability_text")
+    );
+    assert_eq!(
+        result.messages[0].description.as_deref(),
+        Some("Default guidance.")
+    );
+    assert_eq!(
+        result.messages[2].description.as_deref(),
+        Some("Authored guidance.")
+    );
+}
+
+#[test]
+fn captures_a_ron_field_path_without_a_configured_default() {
+    let result = scan_with_ron_default(
+        r#"CardDefinition(name: Tx("Windcutter"))"#,
+        Language::Ron,
+        None,
+    );
+
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        result.messages[0].ron_path.as_deref(),
+        Some("CardDefinition.name")
+    );
+    assert_eq!(result.messages[0].description, None);
+}
+
+#[test]
+fn ron_paths_retain_nested_constructor_and_field_context() {
+    let result = scan_with_ron_default(
+        r#"Outer(details: [Inner(label: Tx("Nested"))])"#,
+        Language::Ron,
+        None,
+    );
+
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(
+        result.messages[0].ron_path.as_deref(),
+        Some("Outer.details.Inner.label")
+    );
 }
 
 fn scan_tsx(source: &str) -> ScanResult {

@@ -18,7 +18,7 @@ use unicode_normalization::UnicodeNormalization;
 use crate::cldr::{LocaleData, locale_data};
 use crate::config::{NumberPolicy, ProjectConfig, SourceFallback};
 use crate::diagnostic::{Diagnostic, DiagnosticResultExt, Diagnostics, Span};
-use crate::scanner::{ArgumentSchema, ExtractedMessage, scan_file};
+use crate::scanner::{ArgumentSchema, ExtractedMessage, SourceLocation, scan_file};
 
 mod discovery;
 mod expansion;
@@ -174,11 +174,12 @@ pub struct MessageEntry {
     pub source_signature: String,
     pub identity: IdentityDescriptor,
     pub descriptions: BTreeSet<String>,
+    pub ron_paths: BTreeSet<String>,
     pub arguments: BTreeMap<String, ArgumentSchema>,
     pub term_reachability: TermReachability,
     pub selector_labels: BTreeMap<Vec<usize>, BTreeSet<String>>,
     pub predicate_labels: SelectorPredicateLabels,
-    pub locations: BTreeSet<String>,
+    pub locations: BTreeSet<SourceLocation>,
     pub context_revision: String,
 }
 
@@ -400,6 +401,7 @@ fn build_catalog_impl(
     for (entry_id, calls) in grouped {
         let first = &calls[0];
         let mut descriptions = BTreeSet::new();
+        let mut ron_paths = BTreeSet::new();
         let mut locations = BTreeSet::new();
         let mut selector_labels: BTreeMap<Vec<usize>, BTreeSet<String>> = BTreeMap::new();
         let mut predicate_labels = SelectorPredicateLabels::new();
@@ -415,7 +417,10 @@ fn build_catalog_impl(
             if let Some(description) = &call.description {
                 descriptions.insert(description.clone());
             }
-            locations.insert(call.location.display(&config.root));
+            if let Some(ron_path) = &call.ron_path {
+                ron_paths.insert(ron_path.clone());
+            }
+            locations.insert(call.location.clone());
             for (path, label) in &call.selector_labels {
                 selector_labels
                     .entry(path.clone())
@@ -426,7 +431,7 @@ fn build_catalog_impl(
                 merge_predicate_labels(&mut predicate_labels, path, labels);
             }
         }
-        if descriptions.is_empty() {
+        if descriptions.is_empty() && ron_paths.is_empty() {
             diagnostics.push(Diagnostic::warning(
                 "trox.missing-ron-description",
                 format!("RON message `{entry_id}` has no description"),
@@ -448,6 +453,7 @@ fn build_catalog_impl(
         let context = json!({
             "arguments": first.arguments,
             "descriptions": descriptions,
+            "ron_paths": ron_paths,
             "predicate_labels": predicate_labels.iter().map(|(path, values)| json!({"path":path,"values":values})).collect::<Vec<_>>(),
             "selector_labels": selector_labels.iter().map(|(path, values)| json!({"path":path,"values":values})).collect::<Vec<_>>(),
             "term_forms": term_form_context(config, &first.arguments),
@@ -463,6 +469,7 @@ fn build_catalog_impl(
                 source_signature: first.source_signature.clone(),
                 identity: first.identity.clone(),
                 descriptions,
+                ron_paths,
                 arguments: first.arguments.clone(),
                 term_reachability,
                 selector_labels,

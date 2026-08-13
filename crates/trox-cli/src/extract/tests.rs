@@ -44,6 +44,68 @@ fn profile() -> LocaleProfile {
 }
 
 #[test]
+fn message_rows_follow_the_earliest_source_location() {
+    let config = config_with_number_fallback();
+    let message = |entry_id: &str, english: &str, locations: Vec<(&str, usize)>| MessageEntry {
+        entry_id: entry_id.into(),
+        source_signature: format!("signature-{entry_id}"),
+        identity: IdentityDescriptor {
+            identity_version: 1,
+            meaning: None,
+            pattern: Pattern::Text {
+                text: english.into(),
+            },
+        },
+        descriptions: BTreeSet::new(),
+        ron_paths: BTreeSet::new(),
+        arguments: BTreeMap::new(),
+        term_reachability: BTreeMap::new(),
+        selector_labels: BTreeMap::new(),
+        predicate_labels: BTreeMap::new(),
+        locations: locations
+            .into_iter()
+            .map(|(path, line)| SourceLocation {
+                path: path.into(),
+                line,
+                column: 1,
+            })
+            .collect(),
+        context_revision: "revision".into(),
+    };
+    let messages = [
+        message("tx1_a", "Latest", vec![("src/z.rs", 1), ("src/a.rs", 30)]),
+        message("tx1_b", "Middle", vec![("src/a.rs", 20)]),
+        message("tx1_z", "Earliest", vec![("src/a.rs", 3)]),
+    ]
+    .into_iter()
+    .map(|entry| (entry.entry_id.clone(), entry))
+    .collect();
+    let model = CatalogModel {
+        messages,
+        terms: BTreeMap::new(),
+        source_locale_data: locale_data("en-US"),
+        bytes_scanned: 0,
+        files_scanned: 2,
+    };
+
+    let rows = expand_rows(
+        &config,
+        &model,
+        "en-US",
+        &profile(),
+        &mut Diagnostics::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.english.as_str())
+            .collect::<Vec<_>>(),
+        ["Earliest", "Middle", "Latest"]
+    );
+}
+
+#[test]
 fn predicate_labels_merge_with_their_branch_ordinals() {
     let mut merged = BTreeMap::new();
     merge_predicate_labels(&mut merged, &[2, 0], &["zebra".into(), "alpha".into()]);
@@ -91,6 +153,7 @@ fn select_conditions_display_only_the_labels_for_the_selected_branch() {
             pattern,
         },
         descriptions: BTreeSet::new(),
+        ron_paths: BTreeSet::new(),
         arguments: BTreeMap::new(),
         term_reachability: BTreeMap::new(),
         selector_labels: BTreeMap::from([(vec![], BTreeSet::from(["choice".into()]))]),
@@ -149,6 +212,7 @@ fn message_meaning_is_included_in_the_translator_description() {
             "Button label that opens a deck.".into(),
             "Shown in the deck browser.".into(),
         ]),
+        ron_paths: BTreeSet::new(),
         arguments: BTreeMap::new(),
         term_reachability: BTreeMap::new(),
         selector_labels: BTreeMap::new(),
@@ -176,6 +240,54 @@ fn message_meaning_is_included_in_the_translator_description() {
     assert_eq!(
         rows[0].description,
         "Meaning: open-action\n\nButton label that opens a deck.\n\nShown in the deck browser."
+    );
+}
+
+#[test]
+fn ron_paths_are_included_in_the_translator_description() {
+    let config = config_with_number_fallback();
+    let entry = MessageEntry {
+        entry_id: "tx1_test".into(),
+        source_signature: "signature".into(),
+        identity: IdentityDescriptor {
+            identity_version: 1,
+            meaning: None,
+            pattern: Pattern::Text {
+                text: "Shared card text".into(),
+            },
+        },
+        descriptions: BTreeSet::from(["Authored guidance.".into()]),
+        ron_paths: BTreeSet::from([
+            "CardDefinition.name".into(),
+            "CardDefinition.ability_text".into(),
+        ]),
+        arguments: BTreeMap::new(),
+        term_reachability: BTreeMap::new(),
+        selector_labels: BTreeMap::new(),
+        predicate_labels: BTreeMap::new(),
+        locations: BTreeSet::new(),
+        context_revision: "revision".into(),
+    };
+    let model = CatalogModel {
+        messages: BTreeMap::from([("tx1_test".into(), entry)]),
+        terms: BTreeMap::new(),
+        source_locale_data: locale_data("en-US"),
+        bytes_scanned: 0,
+        files_scanned: 0,
+    };
+
+    let rows = expand_rows(
+        &config,
+        &model,
+        "en-US",
+        &profile(),
+        &mut Diagnostics::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        rows[0].description,
+        "Authored guidance.\n\nPaths: CardDefinition.ability_text; CardDefinition.name"
     );
 }
 
@@ -241,6 +353,7 @@ fn numbered_default_fallback_keeps_message_facets_reachable() {
             },
         },
         descriptions: BTreeSet::new(),
+        ron_paths: BTreeSet::new(),
         arguments: BTreeMap::from([(
             "item".into(),
             ArgumentSchema::Term {
@@ -401,6 +514,7 @@ fn facet_expansion_stops_at_the_configured_cap() {
             pattern: Pattern::Text { text: "x".into() },
         },
         descriptions: BTreeSet::new(),
+        ron_paths: BTreeSet::new(),
         arguments,
         term_reachability,
         selector_labels: BTreeMap::new(),
@@ -486,6 +600,7 @@ fn selector_expansion_stops_before_materializing_over_cap_leaves() {
             pattern,
         },
         descriptions: BTreeSet::new(),
+        ron_paths: BTreeSet::new(),
         arguments: BTreeMap::new(),
         term_reachability: BTreeMap::new(),
         selector_labels: BTreeMap::new(),
@@ -611,6 +726,7 @@ fn revision_context_tracks_only_relevant_forms_and_locale_term_metadata() {
             },
         },
         descriptions: BTreeSet::new(),
+        ron_paths: BTreeSet::new(),
         arguments,
         term_reachability: BTreeMap::from([("noun".into(), Some(BTreeSet::from(["card".into()])))]),
         selector_labels: BTreeMap::new(),

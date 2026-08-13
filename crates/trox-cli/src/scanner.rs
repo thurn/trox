@@ -95,6 +95,7 @@ impl Scanner<'_> {
         let mut index = start_index;
         let mut regex_allowed = true;
         let mut delimiter_stack = Vec::new();
+        let mut ron_path = (self.language == Language::Ron).then(RonPathTracker::default);
         let mut brace_is_block = Vec::new();
         let mut closed_parenthesized_expression = false;
         let mut next_brace_is_block = false;
@@ -154,6 +155,9 @@ impl Scanner<'_> {
                     }
                 };
                 if !wanted || matches!(previous_nonspace(bytes, start), Some(b'.' | b'#')) {
+                    if let Some(path) = &mut ron_path {
+                        path.identifier(identifier);
+                    }
                     continue;
                 }
                 let mut cursor = Cursor::new(self.source, index, self.language);
@@ -163,7 +167,8 @@ impl Scanner<'_> {
                 }
                 let call_content_start = cursor.index;
                 let result = if self.language == Language::Ron {
-                    parse_ron_tx(&mut cursor, self.ron_default_description)
+                    let path = ron_path.as_ref().and_then(RonPathTracker::display);
+                    parse_ron_tx(&mut cursor, self.ron_default_description, path.as_deref())
                 } else {
                     parse_code_call(&mut cursor, identifier == "txa")
                 };
@@ -185,6 +190,9 @@ impl Scanner<'_> {
                 index = cursor.index.max(index).min(end_index);
                 regex_allowed = false;
             } else {
+                if let Some(path) = &mut ron_path {
+                    path.punctuation(self.source, index);
+                }
                 match bytes[index] {
                     b'(' | b'[' => {
                         delimiter_stack.push(bytes[index]);
@@ -259,10 +267,97 @@ impl Scanner<'_> {
     }
 }
 
+#[derive(Default)]
+struct RonPathTracker {
+    frames: Vec<RonPathFrame>,
+    pending_identifier: Option<String>,
+}
+
+#[derive(Default)]
+struct RonPathFrame {
+    close: Option<u8>,
+    constructor: Option<String>,
+    field: Option<String>,
+}
+
+impl RonPathTracker {
+    fn identifier(&mut self, identifier: &str) {
+        self.ensure_root();
+        self.pending_identifier = Some(identifier.to_owned());
+    }
+
+    fn punctuation(&mut self, source: &str, index: usize) {
+        self.ensure_root();
+        let bytes = source.as_bytes();
+        match bytes[index] {
+            b':' if bytes.get(index.saturating_sub(1)) == Some(&b':')
+                || bytes.get(index + 1) == Some(&b':') => {}
+            b':' => {
+                self.frames.last_mut().unwrap().field = self.pending_identifier.take();
+            }
+            b'(' => {
+                self.frames.push(RonPathFrame {
+                    close: Some(b')'),
+                    constructor: self.pending_identifier.take(),
+                    field: None,
+                });
+            }
+            b'[' => {
+                self.pending_identifier = None;
+                self.frames.push(RonPathFrame {
+                    close: Some(b']'),
+                    constructor: None,
+                    field: None,
+                });
+            }
+            b'{' => {
+                self.pending_identifier = None;
+                self.frames.push(RonPathFrame {
+                    close: Some(b'}'),
+                    constructor: None,
+                    field: None,
+                });
+            }
+            close @ (b')' | b']' | b'}') => {
+                self.pending_identifier = None;
+                if self
+                    .frames
+                    .last()
+                    .is_some_and(|frame| frame.close == Some(close))
+                {
+                    self.frames.pop();
+                }
+            }
+            b',' => {
+                self.pending_identifier = None;
+                self.frames.last_mut().unwrap().field = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn display(&self) -> Option<String> {
+        let segments = self
+            .frames
+            .iter()
+            .flat_map(|frame| [frame.constructor.as_deref(), frame.field.as_deref()])
+            .flatten()
+            .collect::<Vec<_>>();
+        (!segments.is_empty()).then(|| segments.join("."))
+    }
+
+    fn ensure_root(&mut self) {
+        if self.frames.is_empty() {
+            self.frames.push(RonPathFrame::default());
+        }
+    }
+}
+
 struct ParsedCall {
     pattern: Pattern,
     meaning: Option<String>,
     description: Option<String>,
+    ron_path: Option<String>,
     arguments: BTreeMap<String, ArgumentSchema>,
     term_ids: BTreeMap<String, Option<String>>,
     selector_labels: BTreeMap<Vec<usize>, String>,
@@ -288,6 +383,7 @@ impl ParsedCall {
             entry_id,
             source_signature,
             description: self.description,
+            ron_path: self.ron_path,
             arguments: self.arguments,
             term_ids: self.term_ids,
             selector_labels: self.selector_labels,
@@ -339,6 +435,7 @@ fn parse_code_call(cursor: &mut Cursor<'_>, has_arguments: bool) -> ParseResult<
         pattern: parsed.pattern,
         meaning: parsed.meaning,
         description: Some(description),
+        ron_path: None,
         arguments: parsed_arguments.schemas,
         term_ids: parsed_arguments.term_ids,
         selector_labels: parsed.selector_labels,
@@ -349,12 +446,13 @@ fn parse_code_call(cursor: &mut Cursor<'_>, has_arguments: bool) -> ParseResult<
 fn parse_ron_tx(
     cursor: &mut Cursor<'_>,
     default_description: Option<&str>,
+    ron_path: Option<&str>,
 ) -> ParseResult<ParsedCall> {
     if cursor.peek_literal_start() {
         let text = cursor.parse_string()?.decoded;
         cursor.optional_trailing_comma();
         cursor.expect_char(')')?;
-        return finish_ron_tx(cursor, text, None, None, default_description);
+        return finish_ron_tx(cursor, text, None, None, default_description, ron_path);
     }
 
     let mut text = None;
@@ -398,7 +496,14 @@ fn parse_ron_tx(
         rule: "trox.ron-missing-text",
         message: "Tx requires `text`".into(),
     })?;
-    finish_ron_tx(cursor, text, description, meaning, default_description)
+    finish_ron_tx(
+        cursor,
+        text,
+        description,
+        meaning,
+        default_description,
+        ron_path,
+    )
 }
 
 fn finish_ron_tx(
@@ -407,6 +512,7 @@ fn finish_ron_tx(
     description: Option<String>,
     meaning: Option<String>,
     default_description: Option<&str>,
+    ron_path: Option<&str>,
 ) -> ParseResult<ParsedCall> {
     let placeholders = parse_placeholders(&text).map_err(|message| ParseError {
         offset: cursor.index,
@@ -419,7 +525,8 @@ fn finish_ron_tx(
             "RON Tx text cannot contain placeholders",
         );
     }
-    if let Some(description) = description.as_deref().or(default_description) {
+    let description = description.or_else(|| default_description.map(str::to_owned));
+    if let Some(description) = description.as_deref() {
         validate_description(description).map_err(|message| ParseError {
             offset: cursor.index,
             rule: "trox.description",
@@ -429,7 +536,8 @@ fn finish_ron_tx(
     Ok(ParsedCall {
         pattern: Pattern::Text { text },
         meaning,
-        description: description.or_else(|| default_description.map(str::to_owned)),
+        description,
+        ron_path: ron_path.map(str::to_owned),
         arguments: BTreeMap::new(),
         term_ids: BTreeMap::new(),
         selector_labels: BTreeMap::new(),

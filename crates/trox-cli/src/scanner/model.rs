@@ -8,7 +8,7 @@ use trox::IdentityDescriptor;
 
 use crate::diagnostic::Diagnostic;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SourceLocation {
     pub path: PathBuf,
     pub line: usize,
@@ -33,6 +33,7 @@ pub struct ExtractedMessage {
     pub entry_id: String,
     pub source_signature: String,
     pub description: Option<String>,
+    pub ron_path: Option<String>,
     pub arguments: BTreeMap<String, ArgumentSchema>,
     /// Per-term-argument literal reachability. `None` means the term ID is dynamic.
     pub term_ids: BTreeMap<String, Option<String>>,

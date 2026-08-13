@@ -84,7 +84,14 @@ fn expand_rows_impl(
     validate_profile_terms(config, model, profile)?;
     let data = locale_data(locale);
     let mut rows = Vec::new();
-    for entry in model.messages.values() {
+    let mut messages = model.messages.values().collect::<Vec<_>>();
+    messages.sort_by(|left, right| {
+        left.locations
+            .first()
+            .cmp(&right.locations.first())
+            .then_with(|| left.entry_id.cmp(&right.entry_id))
+    });
+    for entry in messages {
         let mut message_rows = expand_message(config, entry, model, profile, &data)?;
         enforce_entry_row_limits(config, &entry.entry_id, message_rows.len(), diagnostics)?;
         rows.append(&mut message_rows);
@@ -211,10 +218,28 @@ fn expand_message(
         .cloned()
         .collect::<Vec<_>>()
         .join("\n\n");
+    let ron_path_description = match entry.ron_paths.len() {
+        0 => String::new(),
+        1 => format!("Path: {}", entry.ron_paths.first().unwrap()),
+        _ => format!(
+            "Paths: {}",
+            entry
+                .ron_paths
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("; ")
+        ),
+    };
+    let source_description = [authored_description.as_str(), ron_path_description.as_str()]
+        .into_iter()
+        .filter(|section| !section.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
     let source_locations = entry
         .locations
         .iter()
-        .cloned()
+        .map(|location| location.display(&config.root))
         .collect::<Vec<_>>()
         .join("; ");
     leaves
@@ -235,7 +260,7 @@ fn expand_message(
                 revision_id(&revision).map_err(|error| anyhow::anyhow!(error.to_string()))?;
             let conditions = leaf.conditions.join("; ");
             let description = translator_description(
-                &authored_description,
+                &source_description,
                 entry.identity.meaning.as_deref(),
                 &conditions,
             );

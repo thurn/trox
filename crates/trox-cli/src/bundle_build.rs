@@ -594,6 +594,7 @@ mod tests {
                     source_signature,
                     identity,
                     descriptions: BTreeSet::from(["Greeting with a name.".into()]),
+                    ron_paths: BTreeSet::new(),
                     arguments: arguments.clone(),
                     term_reachability: BTreeMap::new(),
                     selector_labels: BTreeMap::new(),

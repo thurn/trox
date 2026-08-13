@@ -318,16 +318,17 @@ fn synchronize_impl(
         .enumerate()
         .map(|(index, row)| (row.row_id.as_str(), index))
         .collect();
-    let mut prior_rank = None;
-    for rank in old
-        .rows
-        .iter()
-        .filter_map(|row| expected_rank.get(row.row_id.as_str()).copied())
-    {
-        if prior_rank.is_some_and(|prior| prior >= rank) {
+    let mut prior_ranks = BTreeMap::new();
+    for row in &old.rows {
+        let Some(rank) = expected_rank.get(row.row_id.as_str()).copied() else {
+            continue;
+        };
+        if prior_ranks
+            .insert(row.entry_id.as_str(), rank)
+            .is_some_and(|prior| prior >= rank)
+        {
             bail!("active CSV rows are not in canonical expansion order");
         }
-        prior_rank = Some(rank);
     }
     let active_old: BTreeMap<_, _> = old
         .rows
@@ -798,7 +799,7 @@ mod tests {
     }
 
     #[test]
-    fn spreadsheet_reordering_is_rejected_instead_of_silently_normalized() {
+    fn spreadsheet_reordering_within_an_entry_is_rejected() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("es.csv");
         let expected = [
@@ -817,6 +818,35 @@ mod tests {
                 .unwrap()
                 .to_string()
                 .contains("canonical expansion order")
+        );
+    }
+
+    #[test]
+    fn changed_entry_order_is_normalized_without_losing_translations() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("es.csv");
+        let mut second = expected_id("row1_b", "rev1_same");
+        second.entry_id = "tx1_b".into();
+        let expected = [expected_id("row1_a", "rev1_same"), second];
+        let mut diagnostics = Diagnostics::default();
+        let first = synchronize(&path, &expected, false, &mut diagnostics).unwrap();
+        fs::write(&path, first.bytes).unwrap();
+        let mut document = read_csv(&path).unwrap();
+        document.rows[0].translation = "Primero".into();
+        document.rows[1].translation = "Segundo".into();
+        document.rows.swap(0, 1);
+        fs::write(&path, write_csv(&document).unwrap()).unwrap();
+
+        let normalized = synchronize(&path, &expected, false, &mut diagnostics).unwrap();
+
+        assert_eq!(
+            normalized
+                .document
+                .rows
+                .iter()
+                .map(|row| (row.entry_id.as_str(), row.translation.as_str()))
+                .collect::<Vec<_>>(),
+            [("tx1_a", "Primero"), ("tx1_b", "Segundo")]
         );
     }
 

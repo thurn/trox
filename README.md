@@ -644,6 +644,9 @@ Rules:
 - Use the named form when supplying `description` or `meaning`; `text` is
   required.
 - `description` and `meaning` are optional named fields.
+- Generated descriptions include the structural RON field path, such as
+  `Path: CardDefinition.ability_text`. Array indexes are omitted so every value
+  in the same field shares a stable path.
 - Unwrapped strings are ignored.
 - Placeholders and selectors are rejected.
 - Argument maps, terms, and opaque values are rejected.
@@ -667,7 +670,9 @@ ron_description_defaults: {
 },
 ```
 
-An explicit description overrides a matching path default.
+An explicit description overrides a matching path default. The structural RON
+field path is appended to either description; when neither is present, the path
+itself supplies the description.
 
 ### Serde round-tripping
 
@@ -870,6 +875,9 @@ Extraction is transactional:
 - Successful replacements are atomic.
 - Repeated extraction without changes is byte-identical.
 - Parallel scanning does not change output order.
+- Message rows follow source path, then numeric line and column. When the same
+  message appears more than once, its earliest occurrence determines its
+  position.
 
 Extraction preserves:
 
