@@ -26,6 +26,7 @@ export {
   zero,
   type Argument,
   type ArgumentInput,
+  type ArgumentSchema,
   type BooleanArgument,
   type ExactKey,
   type IdentityDescriptor,

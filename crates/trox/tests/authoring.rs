@@ -85,8 +85,8 @@ fn counted_term_wire_matches_the_shared_catalog_contract() {
     let substituted = serde_json_canonicalizer::to_string(&substituted).unwrap();
     assert!(matches!(
         catalog.localized_string_from_json(&substituted),
-        Err(trox::DeserializeError::Unauthorized(message))
-            if message.contains("does not match its source entry schema")
+        Err(trox::DeserializeError::InvalidValue(message))
+            if message.contains("contract signature mismatch")
     ));
 }
 
@@ -198,6 +198,7 @@ fn nested_patterns_have_canonical_selector_paths() {
                     "count".to_owned(),
                     trox::ArgumentSchema::Scalar,
                 )])),
+                contract_signature: None,
                 identity: Some(value.identity().clone()),
                 rows: BTreeMap::new(),
                 source_signature: value.source_signature().to_owned(),

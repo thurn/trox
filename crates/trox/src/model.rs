@@ -32,6 +32,12 @@ pub struct Version {
 impl Version {
     /// Version 1.0 of the Trox wire format.
     pub const V1: Self = Self { major: 1, minor: 0 };
+    /// Version 1.1 of the Trox wire format.
+    pub const V1_1: Self = Self { major: 1, minor: 1 };
+
+    pub(crate) fn is_supported_v1(self) -> bool {
+        self.major == 1 && self.minor <= 1
+    }
 }
 
 /// Locale-independent fields used to derive a message's stable identity.
@@ -762,7 +768,7 @@ pub(crate) fn validate_arguments(
                 }
             }
             Argument::Opaque { value } => {
-                if value.format != "trox-localized-string" || value.version != Version::V1 {
+                if value.format != "trox-localized-string" || !value.version.is_supported_v1() {
                     return Err(TroxValueError::new(
                         "trox.invalid-opaque-wire",
                         "opaque value has an invalid format or version",
@@ -785,6 +791,22 @@ pub(crate) fn validate_arguments(
                     return Err(TroxValueError::new(
                         "trox.identity-mismatch",
                         "opaque value identity hash does not match its wire IDs",
+                    ));
+                }
+                let contract = crate::value::contract_signature(
+                    &value.identity,
+                    &crate::value::schemas_from_arguments(&value.arguments),
+                )
+                .map_err(|error| TroxValueError::new("trox.contract", error.to_string()))?;
+                if value
+                    .contract_signature
+                    .as_deref()
+                    .is_some_and(|value| value != contract)
+                    || (value.version == Version::V1_1 && value.contract_signature.is_none())
+                {
+                    return Err(TroxValueError::new(
+                        "trox.contract-mismatch",
+                        "opaque value contract signature does not match its arguments",
                     ));
                 }
             }

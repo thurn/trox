@@ -5,8 +5,8 @@ use serde_json::Value;
 use crate::bundle::{Bundle, BundleTermForm};
 use crate::canonical::canonical_json;
 use crate::model::{Argument, ArgumentSchema, IdentityDescriptor, identity_ids};
-use crate::value::LocalizedStringWire;
-use crate::{DeserializeError, LocalizedString};
+use crate::value::{LocalizedStringWire, contract_signature};
+use crate::{DeserializeError, LocalizedString, SourceMessage, SourceMessageRef, TroxValueError};
 
 /// The validated message identities and term schemas authorized by a source bundle.
 ///
@@ -23,6 +23,7 @@ pub struct SourceCatalog {
 #[derive(Debug, Clone)]
 struct CatalogEntry {
     arguments: BTreeMap<String, ArgumentSchema>,
+    contract_signature: String,
     identity: IdentityDescriptor,
     source_signature: String,
 }
@@ -51,6 +52,10 @@ impl SourceCatalog {
             entries.insert(
                 id.clone(),
                 CatalogEntry {
+                    contract_signature: entry.contract_signature.clone().unwrap_or(
+                        contract_signature(&identity, &arguments)
+                            .map_err(|error| DeserializeError::InvalidBundle(error.to_string()))?,
+                    ),
                     arguments,
                     identity,
                     source_signature: entry.source_signature.clone(),
@@ -99,10 +104,7 @@ impl SourceCatalog {
             return Err(DeserializeError::NoncanonicalJson);
         }
         let wire: LocalizedStringWire = serde_json::from_value(value)?;
-        if wire.format != "trox-localized-string"
-            || wire.version.major != 1
-            || wire.version.minor != 0
-        {
+        if wire.format != "trox-localized-string" || !wire.version.is_supported_v1() {
             return Err(DeserializeError::UnsupportedVersion {
                 format: "localized string",
                 major: wire.version.major,
@@ -114,6 +116,19 @@ impl SourceCatalog {
         if entry_id != wire.entry_id || signature != wire.source_signature {
             return Err(DeserializeError::InvalidValue(
                 "identity hash does not match wire IDs".into(),
+            ));
+        }
+        let schemas = crate::value::schemas_from_arguments(&wire.arguments);
+        let computed_contract = contract_signature(&wire.identity, &schemas)
+            .map_err(|error| DeserializeError::InvalidValue(error.to_string()))?;
+        if wire
+            .contract_signature
+            .as_deref()
+            .is_some_and(|value| value != computed_contract)
+            || (wire.version == crate::Version::V1_1 && wire.contract_signature.is_none())
+        {
+            return Err(DeserializeError::InvalidValue(
+                "localized value contract signature mismatch".into(),
             ));
         }
         if wire.identity.meaning.as_deref() == Some(crate::pattern::ASSERT_LOCALIZED_MEANING) {
@@ -135,7 +150,10 @@ impl SourceCatalog {
         let Some(authorized) = self.entries.get(&entry_id) else {
             return Err(DeserializeError::Unauthorized(entry_id));
         };
-        if authorized.source_signature != signature || authorized.identity != wire.identity {
+        if authorized.source_signature != signature
+            || authorized.contract_signature != computed_contract
+            || authorized.identity != wire.identity
+        {
             return Err(DeserializeError::Unauthorized(format!(
                 "incompatible identity for `{entry_id}`"
             )));
@@ -197,6 +215,71 @@ impl SourceCatalog {
             wire.source_signature,
         )
         .map_err(|error| DeserializeError::InvalidValue(error.to_string()))
+    }
+
+    /// Authorizes a parsed source-message reference against this catalog.
+    pub fn source_message_from_value(
+        &self,
+        value: serde_json::Value,
+    ) -> Result<SourceMessage, DeserializeError> {
+        let reference: SourceMessageRef = serde_json::from_value(value)?;
+        if reference.format != "trox-source-message-ref" || reference.version != crate::Version::V1
+        {
+            return Err(DeserializeError::UnsupportedVersion {
+                format: "source message reference",
+                major: reference.version.major,
+                minor: reference.version.minor,
+            });
+        }
+        let Some(entry) = self.entries.get(&reference.entry_id) else {
+            return Err(DeserializeError::Unauthorized(reference.entry_id));
+        };
+        if entry.source_signature != reference.source_signature
+            || entry.contract_signature != reference.contract_signature
+        {
+            return Err(DeserializeError::Unauthorized(format!(
+                "incompatible source-message contract for `{}`",
+                reference.entry_id
+            )));
+        }
+        Ok(SourceMessage {
+            catalog: self.clone(),
+            argument_schemas: entry.arguments.clone(),
+            identity: entry.identity.clone(),
+            reference,
+        })
+    }
+
+    /// Decodes canonical JSON and authorizes its source-message reference.
+    pub fn source_message_from_json(&self, input: &str) -> Result<SourceMessage, DeserializeError> {
+        let value: Value = serde_json::from_str(input)?;
+        let canonical = canonical_json(&value)
+            .map_err(|error| DeserializeError::InvalidValue(error.to_string()))?;
+        if canonical != input {
+            return Err(DeserializeError::NoncanonicalJson);
+        }
+        self.source_message_from_value(value)
+    }
+
+    pub(crate) fn bind_source_message(
+        &self,
+        message: &SourceMessage,
+        arguments: BTreeMap<String, Argument>,
+    ) -> Result<LocalizedString, TroxValueError> {
+        authorize_argument_schemas(&message.argument_schemas, &arguments)
+            .map_err(|error| TroxValueError::new("trox.argument-mismatch", error.to_string()))?;
+        let value = LocalizedString::build_with_known_ids(
+            message.identity.clone(),
+            arguments,
+            vec![],
+            message.reference.entry_id.clone(),
+            message.reference.source_signature.clone(),
+        )?;
+        let json = value
+            .to_canonical_json()
+            .map_err(|error| TroxValueError::new("trox.serialize", error.to_string()))?;
+        self.localized_string_from_json(&json)
+            .map_err(|error| TroxValueError::new("trox.unauthorized-argument", error.to_string()))
     }
 }
 

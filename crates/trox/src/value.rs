@@ -4,13 +4,13 @@ use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::canonical::{canonical_json, short_id, signature};
+use crate::canonical::{canonical_json, short_id, signature, signature_hex};
 use crate::model::{
     Argument, ArgumentSchema, IdentityDescriptor, IntoArgument, Pattern, SelectorRecord, Version,
     validate_argument_schemas, validate_arguments, validate_identity, validate_selectors,
 };
 use crate::pattern::ASSERT_LOCALIZED_MEANING;
-use crate::{SerializeError, TroxValueError};
+use crate::{SerializeError, SourceMessageRef, TroxValueError};
 
 /// Canonical serialized representation of a [`LocalizedString`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -18,6 +18,9 @@ use crate::{SerializeError, TroxValueError};
 pub struct LocalizedStringWire {
     /// Arguments keyed by placeholder name.
     pub arguments: BTreeMap<String, Argument>,
+    /// Signature of the identity and placeholder contract (wire 1.1+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract_signature: Option<String>,
     /// Short stable ID derived from `identity`.
     pub entry_id: String,
     /// Wire format discriminator.
@@ -54,8 +57,15 @@ struct IdentityIds {
 }
 
 #[derive(Serialize)]
+struct ContractDescriptor<'a> {
+    arguments: &'a BTreeMap<String, ArgumentSchema>,
+    identity: &'a IdentityDescriptor,
+}
+
+#[derive(Serialize)]
 struct LocalizedStringWireRef<'a> {
     arguments: &'a BTreeMap<String, Argument>,
+    contract_signature: String,
     entry_id: &'a str,
     format: &'static str,
     identity: &'a IdentityDescriptor,
@@ -95,6 +105,26 @@ impl PartialEq for LocalizedString {
 }
 
 impl LocalizedString {
+    /// Produces an argument-free reference to this static value or unbound RON template.
+    pub fn source_message_ref(&self) -> Result<SourceMessageRef, TroxValueError> {
+        if !self.data.arguments.is_empty() || !self.data.selectors.is_empty() {
+            return Err(TroxValueError::new(
+                "trox.bound-source-message",
+                "source message references cannot retain runtime arguments or selectors",
+            ));
+        }
+        let arguments = self.data.ron_template_arguments.clone().unwrap_or_default();
+        let ids = self.data.ids();
+        Ok(SourceMessageRef {
+            contract_signature: contract_signature(&self.data.identity, &arguments)
+                .map_err(|error| TroxValueError::new("trox.contract", error.to_string()))?,
+            entry_id: ids.entry_id.clone(),
+            format: "trox-source-message-ref".into(),
+            source_signature: ids.source_signature.clone(),
+            version: Version::V1,
+        })
+    }
+
     pub(crate) fn build(
         identity: IdentityDescriptor,
         arguments: BTreeMap<String, Argument>,
@@ -177,6 +207,15 @@ impl LocalizedString {
         &self.data.ids().source_signature
     }
 
+    /// Returns the signature of this value's source identity and argument contract.
+    pub fn contract_signature(&self) -> String {
+        contract_signature(
+            &self.data.identity,
+            &schemas_from_arguments(&self.data.arguments),
+        )
+        .expect("validated Trox contracts always have a canonical encoding")
+    }
+
     /// Returns the locale-independent identity descriptor.
     pub fn identity(&self) -> &IdentityDescriptor {
         &self.data.identity
@@ -252,12 +291,13 @@ impl LocalizedString {
         let ids = self.data.ids();
         canonical_json(&LocalizedStringWireRef {
             arguments: &self.data.arguments,
+            contract_signature: self.contract_signature(),
             entry_id: &ids.entry_id,
             format: "trox-localized-string",
             identity: &self.data.identity,
             selectors: &self.data.selectors,
             source_signature: &ids.source_signature,
-            version: Version::V1,
+            version: Version::V1_1,
         })
     }
 
@@ -267,16 +307,51 @@ impl LocalizedString {
             compute_identity_ids(&data.identity)
                 .expect("validated Trox identities always have a canonical encoding")
         });
+        let contract_signature =
+            contract_signature(&data.identity, &schemas_from_arguments(&data.arguments))
+                .expect("validated Trox contracts always have a canonical encoding");
         LocalizedStringWire {
             arguments: data.arguments,
+            contract_signature: Some(contract_signature),
             entry_id: ids.entry_id,
             format: "trox-localized-string".to_owned(),
             identity: data.identity,
             selectors: data.selectors,
             source_signature: ids.source_signature,
-            version: Version::V1,
+            version: Version::V1_1,
         }
     }
+}
+
+pub(crate) fn schemas_from_arguments(
+    arguments: &BTreeMap<String, Argument>,
+) -> BTreeMap<String, ArgumentSchema> {
+    arguments
+        .iter()
+        .map(|(name, argument)| {
+            let schema = match argument {
+                Argument::Text { .. } | Argument::Number { .. } | Argument::Boolean { .. } => {
+                    ArgumentSchema::Scalar
+                }
+                Argument::Opaque { .. } => ArgumentSchema::Opaque,
+                Argument::Term { form, number, .. } => ArgumentSchema::Term {
+                    form: form.clone(),
+                    number: number.is_some(),
+                },
+            };
+            (name.clone(), schema)
+        })
+        .collect()
+}
+
+pub(crate) fn contract_signature(
+    identity: &IdentityDescriptor,
+    arguments: &BTreeMap<String, ArgumentSchema>,
+) -> Result<String, serde_json::Error> {
+    signature_hex(&ContractDescriptor {
+        arguments,
+        identity,
+    })
 }
 
 fn validate_bound_schemas(

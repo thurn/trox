@@ -132,6 +132,9 @@ pub struct BundleEntry {
     /// Source-authored placeholder contracts, present only in source bundles.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arguments: Option<BTreeMap<String, ArgumentSchema>>,
+    /// Signature of the source identity and placeholder contract (bundle 1.1+).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract_signature: Option<String>,
     /// Canonical source identity, present only in source bundles.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identity: Option<IdentityDescriptor>,
@@ -477,7 +480,19 @@ impl Localizer {
             let Some(source_entry) = self.source.entries.get(id) else {
                 continue;
             };
-            if target_entry.source_signature != source_entry.source_signature {
+            let source_contract = source_entry.contract_signature.clone().or_else(|| {
+                Some(
+                    crate::value::contract_signature(
+                        source_entry.identity.as_ref()?,
+                        source_entry.arguments.as_ref()?,
+                    )
+                    .expect("validated source contracts are canonically encodable"),
+                )
+            });
+            if target_entry.source_signature != source_entry.source_signature
+                || (target_entry.contract_signature.is_some()
+                    && target_entry.contract_signature != source_contract)
+            {
                 continue;
             }
             let identity = source_entry
@@ -514,7 +529,13 @@ impl Localizer {
             .target
             .entries
             .get(value.entry_id())
-            .filter(|entry| entry.source_signature == value.source_signature())
+            .filter(|entry| {
+                entry.source_signature == value.source_signature()
+                    && entry
+                        .contract_signature
+                        .as_deref()
+                        .is_none_or(|signature| signature == value.contract_signature())
+            })
             .ok_or_else(|| ResolveError::MissingMessage {
                 entry_id: value.entry_id().to_owned(),
             })?;

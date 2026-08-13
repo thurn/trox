@@ -253,7 +253,7 @@ describe("source catalog authorization", () => {
     ["opaque", { kind: "opaque", value: tx("Card", "Card label.").wireValue() }],
     ["different form", { kind: "term", form: "indefinite", term_id: "unit.card" }],
     ["different number policy", { kind: "term", form: "counted", term_id: "unit.card" }],
-  ])("rejects a %s substitution before global term authorization", (_label, replacement) => {
+  ])("rejects a %s substitution with a stale v1.1 contract", (_label, replacement) => {
     const sourceJson = readFileSync(
       new URL("../../../conformance/source-term-contract.json", import.meta.url),
       "utf8",
@@ -267,7 +267,7 @@ describe("source catalog authorization", () => {
     wire.arguments.noun = replacement;
 
     expect(() => new SourceCatalog(source).localizedStringFromJSON(canonicalJson(wire)))
-      .toThrow(/source entry schema/);
+      .toThrow(TroxDeserializeError);
   });
 
   it("enforces source-only argument schema maps with exact placeholder keys", () => {

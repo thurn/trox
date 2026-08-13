@@ -733,6 +733,36 @@ let value = template.bind_ron_template(tx_args![
 let rendered = localizer.resolve_checked(&value)?;
 ```
 
+### Transporting RON messages without text lowering
+
+Use a `SourceMessageRef` when application data must cross a Rust-to-TypeScript
+boundary before runtime arguments are available. The reference contains only
+stable entry, identity, and contract signatures. It contains neither English
+source text nor runtime argument values.
+
+```rust
+let template: LocalizedString = ron::from_str(
+    r#"Tx(text: "Erode {count}", placeholders: { "count": Scalar })"#,
+)?;
+let source_ref = template.source_message_ref()?;
+let json = source_ref.to_canonical_json()?;
+```
+
+Authorize the parsed reference with the deployed source bundle, then bind its
+exact typed argument contract:
+
+```ts
+const message = sourceCatalog.sourceMessageFromJSON(json);
+const localized = message.bind({ count: 3 });
+const rendered = localizer.resolve(localized);
+```
+
+`sourceMessageFromValue` accepts an already-parsed JSON value. A
+`SourceMessage` exposes an immutable `argumentSchemas` record and rejects
+missing, extra, wrong-kind, unauthorized term-form, and non-atomic opaque
+bindings. Static references bind with an empty record. Rust provides the same
+catalog authorization and `SourceMessage::bind` contract.
+
 The bound argument names and kinds must exactly match their declarations. Term
 bindings must also match the declared form and whether a number is present.
 
@@ -1061,15 +1091,17 @@ Bundles are canonical JSON containing:
 - Validated term forms and facet metadata.
 
 The source bundle authorizes message identities, full signatures, visible
-argument schemas, terms, and forms. Target bundles contain translated rows and
-compatibility data.
+argument schemas, terms, and forms. Version 1.1 bundles also carry a contract
+signature derived from the identity and argument schemas. Target bundles
+contain translated rows and compatibility data.
 
 Loading rejects unknown major versions, unsupported features, noncanonical
 JSON, duplicate IDs, irreproducible IDs, invalid paths, and invalid signatures.
 
 A catalog mismatch can preserve entry-level compatibility in normal mode.
-Entries with matching IDs and full signatures remain usable; incompatible
-entries use source fallback. Strict construction rejects any mismatch.
+Version 1.1 entries require matching contract signatures; version 1.0 entries
+use their stable source signatures. Incompatible entries use source fallback.
+Strict construction rejects any catalog-fingerprint mismatch.
 
 Runtime responsibilities:
 
@@ -1134,7 +1166,8 @@ Runtime loading validates:
 - Expansion row IDs.
 
 Shared fixtures cover static and dynamic identities, canonical wire bytes,
-argument authorization, nested selectors, lookup, and fallback.
+source-message references, argument authorization, nested selectors, lookup,
+legacy version upgrades, and fallback.
 
 Before changing identity, bundle, or wire behavior, run:
 

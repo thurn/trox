@@ -50,6 +50,7 @@ fn source_bundle(values: &[&LocalizedString]) -> Bundle {
             value.entry_id().to_owned(),
             BundleEntry {
                 arguments: Some(argument_schemas(value)),
+                contract_signature: None,
                 identity: Some(value.identity().clone()),
                 rows: BTreeMap::new(),
                 source_signature: value.source_signature().to_owned(),
@@ -87,6 +88,7 @@ fn translated_entry(value: &LocalizedString, translation: &str) -> BundleEntry {
     let row_id = expansion_row_id(&expansion).expect("valid empty expansion");
     BundleEntry {
         arguments: None,
+        contract_signature: None,
         identity: None,
         rows: BTreeMap::from([(
             row_id,
@@ -249,11 +251,13 @@ fn catalog_mismatch_is_diagnostic_normally_and_an_error_in_strict_mode() {
     let value = tx("Close", "Close button label.");
     let source = source_bundle(&[&value]);
     let mut target = bundle("es");
+    target.version = Version::V1_1;
     target.source_catalog_fingerprint = "1".repeat(64);
-    target.entries.insert(
-        value.entry_id().to_owned(),
-        translated_entry(&value, "Cerrar"),
-    );
+    let mut translated = translated_entry(&value, "Cerrar");
+    translated.contract_signature = Some(value.contract_signature());
+    target
+        .entries
+        .insert(value.entry_id().to_owned(), translated);
 
     let diagnostics = Arc::new(Mutex::new(Vec::new()));
     let captured = Arc::clone(&diagnostics);
@@ -331,6 +335,7 @@ fn target_entry_ids_require_canonical_short_id_encoding() {
             entry_id,
             BundleEntry {
                 arguments: None,
+                contract_signature: None,
                 identity: None,
                 rows: BTreeMap::new(),
                 source_signature: "0".repeat(64),

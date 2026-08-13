@@ -39,6 +39,7 @@ mod model;
 mod pattern;
 mod ron_adapter;
 mod runtime;
+mod source_message;
 mod value;
 
 pub use bundle::{
@@ -53,12 +54,21 @@ pub use model::{
     Pattern, PluralCategory, SelectIdentityBranch, SelectorKey, SelectorRecord, TermArgument,
     TermId, TroxInteger, TroxNumber, Version, expansion_row_id, identity_ids, revision_id,
 };
+/// Computes the v1.1 compatibility signature for an identity and argument schema.
+pub fn contract_signature(
+    identity: &IdentityDescriptor,
+    arguments: &std::collections::BTreeMap<String, ArgumentSchema>,
+) -> Result<String, TroxValueError> {
+    value::contract_signature(identity, arguments)
+        .map_err(|error| TroxValueError::new("trox.contract", error.to_string()))
+}
 pub use pattern::{
     PatternValue, SelectArm, TroxSelector, assert_localized, counted, exact, few, indefinite, many,
     meaning, one, opaque, ordinal, other, otherwise, plural, select, term, two, tx, tx_owned, txa,
     when, zero,
 };
 pub use ron_adapter::{RonPlaceholder, RonTx};
+pub use source_message::{SourceMessage, SourceMessageRef};
 pub use value::LocalizedString;
 
 /// Common types, authoring functions, and macros for application code.

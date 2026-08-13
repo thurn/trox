@@ -8,7 +8,7 @@ use crate::model::{
 use crate::runtime::validate_plural_rules;
 
 pub(super) fn validate_bundle(bundle: &Bundle) -> Result<(), DeserializeError> {
-    if bundle.format != "trox-bundle" || bundle.version.major != 1 || bundle.version.minor != 0 {
+    if bundle.format != "trox-bundle" || !bundle.version.is_supported_v1() {
         return Err(DeserializeError::UnsupportedVersion {
             format: "bundle",
             major: bundle.version.major,
@@ -111,6 +111,16 @@ pub(super) fn validate_bundle(bundle: &Bundle) -> Result<(), DeserializeError> {
                 "entry `{entry_id}` has malformed source signature"
             )));
         }
+        if entry
+            .contract_signature
+            .as_deref()
+            .is_some_and(|value| !is_hex_digest(value))
+            || (bundle.version == Version::V1_1 && entry.contract_signature.is_none())
+        {
+            return Err(DeserializeError::InvalidBundle(format!(
+                "entry `{entry_id}` requires a valid contract signature"
+            )));
+        }
         if source_bundle
             && (entry.arguments.is_none() || entry.identity.is_none() || !entry.rows.is_empty())
         {
@@ -137,6 +147,17 @@ pub(super) fn validate_bundle(bundle: &Bundle) -> Result<(), DeserializeError> {
                 .arguments
                 .as_ref()
                 .expect("validated source arguments");
+            let contract = crate::value::contract_signature(identity, arguments)
+                .map_err(|error| DeserializeError::InvalidBundle(error.to_string()))?;
+            if entry
+                .contract_signature
+                .as_deref()
+                .is_some_and(|value| value != contract)
+            {
+                return Err(DeserializeError::InvalidBundle(format!(
+                    "entry `{entry_id}` contract mismatch"
+                )));
+            }
             let actual: BTreeSet<_> = arguments.keys().cloned().collect();
             if declared != actual {
                 return Err(DeserializeError::InvalidBundle(format!(

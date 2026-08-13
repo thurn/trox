@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { blake3 } from "@noble/hashes/blake3.js";
 import {
-  assertLocalized, bundleFromCanonicalJSON, canonicalJson, counted, exact, Localizer, meaning, one, ordinal, other, plural, select, SourceCatalog, termId, tx, txa, when, otherwise,
-  type Bundle,
+  assertLocalized, bundleFromCanonicalJSON, canonicalJson, counted, exact, Localizer, meaning, one, opaque, ordinal, other, plural, select, SourceCatalog, termId, tx, txa, when, otherwise,
+  type Bundle, type SourceMessageRef,
 } from "./index.js";
 
 describe("authoring", () => {
@@ -95,12 +95,13 @@ describe("authoring", () => {
     const source = testBundle("en-US", {
       [value.entryId]: { arguments: { name: { kind: "scalar" } }, identity: value.identity, rows: {}, source_signature: value.sourceSignature },
     });
-    const target = testBundle("es", {
+    const target: Bundle = { ...testBundle("es", {
       [value.entryId]: {
+        contract_signature: value.contractSignature,
         rows: { [rowId]: { expansion, origin_locale: "es", translation: "Hola {name}" } },
         source_signature: value.sourceSignature,
       },
-    });
+    }), version: { major: 1, minor: 1 } };
     const localizer = new Localizer(target, source, { strict: true });
     expect(localizer.resolveChecked(value)).toBe("Hola \u2068Ada\u2069");
     expect(localizer.localizedStringFromJSON(value.toCanonicalJSON()).toCanonicalJSON()).toBe(value.toCanonicalJSON());
@@ -109,6 +110,52 @@ describe("authoring", () => {
     expect(() => localizer.localizedStringFromJSON(canonicalJson(badSignature))).toThrow(/hash mismatch/);
     const corruptTarget = structuredClone(target) as Bundle; const mutable = corruptTarget.entries[value.entryId]!.rows[rowId]!.expansion.path as unknown[]; mutable.push({ branch: 0, kind: "select" });
     expect(() => new Localizer(corruptTarget, source)).toThrow(/row hash mismatch/);
+  });
+
+  it("authorizes source references and binds scalar, opaque, and term contracts", () => {
+    const deck = tx("Night Garden", "Deck name.");
+    const scalarTemplate = txa("Erode {count}", { count: 1 }, "Rules text.");
+    const opaqueTemplate = txa("Open {deck}", { deck: opaque(deck) }, "Action label.");
+    const termTemplate = txa("Create {noun}", { noun: counted(termId("unit.card"), 1) }, "Rules text.");
+    const source = testBundle("en-US", Object.fromEntries([deck, scalarTemplate, opaqueTemplate, termTemplate].map((value) => [value.entryId, {
+      arguments: value === deck ? {} : value === scalarTemplate ? { count: { kind: "scalar" as const } } : value === opaqueTemplate ? { deck: { kind: "opaque" as const } } : { noun: { form: "counted", kind: "term" as const, number: true } },
+      identity: value.identity,
+      rows: {},
+      source_signature: value.sourceSignature,
+    }])));
+    const sourceWithTerms: Bundle = { ...source, terms: { "unit.card": { facets: {}, forms: { "$default": { kind: "scalar", origin_locale: "en-US", text: "card" }, counted: { kind: "number", values: { other: { origin_locale: "en-US", text: "{number} cards" } } } } } } };
+    const catalog = new SourceCatalog(sourceWithTerms);
+    const reference = (value: typeof scalarTemplate): SourceMessageRef => ({
+      contract_signature: value.contractSignature,
+      entry_id: value.entryId,
+      format: "trox-source-message-ref",
+      source_signature: value.sourceSignature,
+      version: { major: 1, minor: 0 },
+    });
+
+    const sharedReference = readFileSync(new URL("../../../conformance/source-message-scalar.json", import.meta.url), "utf8").trimEnd();
+    const sharedTemplate = txa("Hello {name}", { name: "sample" }, "Greeting.");
+    expect(canonicalJson(reference(sharedTemplate))).toBe(sharedReference);
+
+    expect(catalog.sourceMessageFromValue(reference(scalarTemplate)).bind({ count: 3 }).arguments.count).toEqual({ kind: "number", value: 3 });
+    expect(catalog.sourceMessageFromJSON(canonicalJson(reference(opaqueTemplate))).bind({ deck: opaque(deck) }).entryId).toBe(opaqueTemplate.entryId);
+    expect(catalog.sourceMessageFromValue(reference(termTemplate)).bind({ noun: counted(termId("unit.card"), 3) }).entryId).toBe(termTemplate.entryId);
+    expect(() => catalog.sourceMessageFromValue({ ...reference(scalarTemplate), contract_signature: "0".repeat(64) })).toThrow(/not authorized/);
+    expect(() => catalog.sourceMessageFromValue(reference(scalarTemplate)).bind({})).toThrow(/schemas differ/);
+
+    const staticReference = reference(deck);
+    expect(catalog.sourceMessageFromValue(staticReference).bind({}).isAtomic()).toBe(true);
+  });
+
+  it("upgrades authorized v1.0 localized values to v1.1 on write", () => {
+    const value = txa("Hello {name}", { name: "Ada" }, "Greeting.");
+    const source = testBundle("en-US", { [value.entryId]: { arguments: { name: { kind: "scalar" } }, identity: value.identity, rows: {}, source_signature: value.sourceSignature } });
+    const legacy = JSON.parse(value.toCanonicalJSON()) as Record<string, unknown>;
+    delete legacy.contract_signature;
+    legacy.version = { major: 1, minor: 0 };
+    const upgraded = new SourceCatalog(source).localizedStringFromJSON(canonicalJson(legacy));
+    expect(upgraded.toCanonicalJSON()).toContain('"minor":1');
+    expect(upgraded.toCanonicalJSON()).toContain('"contract_signature"');
   });
 
   it("visibly recovers unknown terms and emits structured diagnostics", () => {

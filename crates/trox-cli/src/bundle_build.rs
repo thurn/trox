@@ -53,17 +53,21 @@ fn build_source_bundle_impl(config: &ProjectConfig, model: &CatalogModel) -> Res
         .messages
         .iter()
         .map(|(id, entry)| {
-            (
+            Ok((
                 id.clone(),
                 BundleEntry {
                     arguments: Some(entry.arguments.clone()),
+                    contract_signature: Some(trox::contract_signature(
+                        &entry.identity,
+                        &entry.arguments,
+                    )?),
                     identity: Some(entry.identity.clone()),
                     rows: BTreeMap::new(),
                     source_signature: entry.source_signature.clone(),
                 },
-            )
+            ))
         })
-        .collect();
+        .collect::<Result<_>>()?;
     let terms = source_terms(config, model)?;
     let bundle = Bundle {
         cldr_version: CLDR_VERSION.into(),
@@ -80,7 +84,7 @@ fn build_source_bundle_impl(config: &ProjectConfig, model: &CatalogModel) -> Res
         source_catalog_fingerprint: fingerprint,
         source_locale: config.source_locale.clone(),
         terms,
-        version: Version::V1,
+        version: Version::V1_1,
     };
     bundle.validate()?;
     Ok(bundle)
@@ -210,17 +214,21 @@ fn build_target_bundle_impl(
         .messages
         .iter()
         .map(|(id, entry)| {
-            (
+            Ok((
                 id.clone(),
                 BundleEntry {
                     arguments: None,
+                    contract_signature: Some(trox::contract_signature(
+                        &entry.identity,
+                        &entry.arguments,
+                    )?),
                     identity: None,
                     rows: BTreeMap::new(),
                     source_signature: entry.source_signature.clone(),
                 },
-            )
+            ))
         })
-        .collect();
+        .collect::<Result<_>>()?;
     let mut missing = Vec::new();
     for row in artifacts
         .expected
@@ -296,7 +304,7 @@ fn build_target_bundle_impl(
         source_catalog_fingerprint: fingerprint,
         source_locale: config.source_locale.clone(),
         terms,
-        version: Version::V1,
+        version: Version::V1_1,
     };
     bundle.validate()?;
     let _ = own_expected; // Kept to make the target row authority explicit during review.
@@ -627,6 +635,18 @@ mod tests {
         assert_eq!(
             bundle.entries[&entry_id].arguments.as_ref(),
             Some(&arguments)
+        );
+        assert_eq!(bundle.version, Version::V1_1);
+        assert_eq!(
+            bundle.entries[&entry_id].contract_signature.as_deref(),
+            Some(
+                trox::contract_signature(
+                    bundle.entries[&entry_id].identity.as_ref().unwrap(),
+                    &arguments,
+                )
+                .unwrap()
+                .as_str()
+            ),
         );
     }
 
