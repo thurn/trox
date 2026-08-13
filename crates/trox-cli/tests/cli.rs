@@ -139,6 +139,20 @@ fn extract_is_deterministic_and_bundle_allow_missing_is_loadable() {
         localizer.resolve_checked(&creation).unwrap(),
         "[es] Create \u{2068}3\u{2069} \u{2068}[es] Warriors\u{2069}."
     );
+    let ron_template: LocalizedString = ron::from_str(
+        r#"Tx(text:"Deck: {deck_name} ({count})",placeholders:{"deck_name":Opaque,"count":Scalar})"#,
+    )
+    .unwrap();
+    let deck_summary = ron_template
+        .bind_ron_template(tx_args![
+            deck_name => opaque(tx("Radiant Echo", "Deck name.")),
+            count => 40_u32,
+        ])
+        .unwrap();
+    assert_eq!(
+        localizer.resolve_checked(&deck_summary).unwrap(),
+        "[es] Deck: \u{2068}[es] Radiant Echo\u{2069} (\u{2068}40\u{2069})"
+    );
     let unknown_noun = counted(TermId::new("card-subtype.unknown"), card_count);
     let recovery = txa(
         "Create {card_count} {creature_noun}.",

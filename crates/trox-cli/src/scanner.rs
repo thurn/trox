@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use trox::{
-    IdentityDescriptor, NumericBranch, NumericBranchKey, Pattern, PluralCategory,
+    IdentityDescriptor, NumericBranch, NumericBranchKey, Pattern, PluralCategory, RonPlaceholder,
     SelectIdentityBranch, identity_ids,
 };
 use unicode_normalization::UnicodeNormalization;
@@ -364,6 +364,14 @@ struct ParsedCall {
     predicate_labels: BTreeMap<Vec<usize>, Vec<String>>,
 }
 
+struct ParsedRonTx {
+    text: String,
+    description: Option<String>,
+    meaning: Option<String>,
+    arguments: BTreeMap<String, ArgumentSchema>,
+    arguments_declared: bool,
+}
+
 impl ParsedCall {
     fn finish(self, path: &Path, line: usize, column: usize) -> Result<ExtractedMessage, String> {
         let identity = IdentityDescriptor {
@@ -452,12 +460,25 @@ fn parse_ron_tx(
         let text = cursor.parse_string()?.decoded;
         cursor.optional_trailing_comma();
         cursor.expect_char(')')?;
-        return finish_ron_tx(cursor, text, None, None, default_description, ron_path);
+        return finish_ron_tx(
+            cursor,
+            ParsedRonTx {
+                text,
+                description: None,
+                meaning: None,
+                arguments: BTreeMap::new(),
+                arguments_declared: false,
+            },
+            default_description,
+            ron_path,
+        );
     }
 
     let mut text = None;
     let mut description = None;
     let mut meaning = None;
+    let mut placeholders = BTreeMap::new();
+    let mut placeholders_declared = false;
     let mut seen = BTreeSet::new();
     loop {
         cursor.skip_space_comments();
@@ -472,11 +493,27 @@ fn parse_ron_tx(
             );
         }
         cursor.expect_char(':')?;
-        let value = cursor.parse_string()?.decoded;
         match field.as_str() {
-            "text" => text = Some(value),
-            "description" => description = Some(value),
-            "meaning" => meaning = Some(value),
+            "text" => text = Some(cursor.parse_string()?.decoded),
+            "description" => description = Some(cursor.parse_string()?.decoded),
+            "meaning" => meaning = Some(cursor.parse_string()?.decoded),
+            "placeholders" => {
+                placeholders_declared = true;
+                cursor.expect_char('{')?;
+                let start = cursor.index;
+                let content = cursor.take_balanced_content('}')?;
+                let encoded = format!("{{{content}}}");
+                let declared: BTreeMap<String, RonPlaceholder> =
+                    ron::from_str(&encoded).map_err(|error| ParseError {
+                        offset: start,
+                        rule: "trox.ron-placeholders",
+                        message: format!("invalid placeholder declarations: {error}"),
+                    })?;
+                placeholders = declared
+                    .into_iter()
+                    .map(|(name, schema)| (name, schema.into()))
+                    .collect();
+            }
             _ => {
                 return cursor.error(
                     "trox.ron-unknown-field",
@@ -498,9 +535,13 @@ fn parse_ron_tx(
     })?;
     finish_ron_tx(
         cursor,
-        text,
-        description,
-        meaning,
+        ParsedRonTx {
+            text,
+            description,
+            meaning,
+            arguments: placeholders,
+            arguments_declared: placeholders_declared,
+        },
         default_description,
         ron_path,
     )
@@ -508,22 +549,44 @@ fn parse_ron_tx(
 
 fn finish_ron_tx(
     cursor: &mut Cursor<'_>,
-    text: String,
-    description: Option<String>,
-    meaning: Option<String>,
+    parsed: ParsedRonTx,
     default_description: Option<&str>,
     ron_path: Option<&str>,
 ) -> ParseResult<ParsedCall> {
-    let placeholders = parse_placeholders(&text).map_err(|message| ParseError {
+    let ParsedRonTx {
+        text,
+        description,
+        meaning,
+        arguments,
+        arguments_declared,
+    } = parsed;
+    parse_placeholders(&text).map_err(|message| ParseError {
         offset: cursor.index,
         rule: "trox.invalid-placeholder",
         message,
     })?;
-    if !placeholders.is_empty() {
-        return cursor.error(
-            "trox.ron-placeholder",
-            "RON Tx text cannot contain placeholders",
-        );
+    let pattern = Pattern::Text { text };
+    validate_placeholder_bindings(&pattern, &arguments, arguments_declared).map_err(|message| {
+        ParseError {
+            offset: cursor.index,
+            rule: "trox.argument-mismatch",
+            message,
+        }
+    })?;
+    if arguments.len() > 256 {
+        return cursor.error("trox.argument-limit", "message exceeds 256 arguments");
+    }
+    for schema in arguments.values() {
+        if let ArgumentSchema::Term {
+            form: Some(form), ..
+        } = schema
+        {
+            validate_stable_id(form, "term form ID").map_err(|message| ParseError {
+                offset: cursor.index,
+                rule: "trox.invalid-term-form",
+                message,
+            })?;
+        }
     }
     let description = description.or_else(|| default_description.map(str::to_owned));
     if let Some(description) = description.as_deref() {
@@ -534,12 +597,16 @@ fn finish_ron_tx(
         })?;
     }
     Ok(ParsedCall {
-        pattern: Pattern::Text { text },
+        pattern,
         meaning,
         description,
         ron_path: ron_path.map(str::to_owned),
-        arguments: BTreeMap::new(),
-        term_ids: BTreeMap::new(),
+        term_ids: arguments
+            .iter()
+            .filter(|(_, schema)| matches!(schema, ArgumentSchema::Term { .. }))
+            .map(|(name, _)| (name.clone(), None))
+            .collect(),
+        arguments,
         selector_labels: BTreeMap::new(),
         predicate_labels: BTreeMap::new(),
     })

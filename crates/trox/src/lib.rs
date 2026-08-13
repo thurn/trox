@@ -58,7 +58,7 @@ pub use pattern::{
     meaning, one, opaque, ordinal, other, otherwise, plural, select, term, two, tx, tx_owned, txa,
     when, zero,
 };
-pub use ron_adapter::RonTx;
+pub use ron_adapter::{RonPlaceholder, RonTx};
 pub use value::LocalizedString;
 
 /// Common types, authoring functions, and macros for application code.

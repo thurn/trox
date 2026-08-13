@@ -30,6 +30,9 @@ pub enum SerializeError {
     /// Canonical JSON encoding failed.
     #[error("failed to encode canonical Trox JSON: {0}")]
     Json(#[from] serde_json::Error),
+    /// An unbound RON template was used where a runtime value was required.
+    #[error("RON template placeholders must be bound before canonical serialization")]
+    UnboundRonTemplate,
 }
 
 /// An error produced while decoding or validating Trox wire data.

@@ -794,6 +794,36 @@ pub(crate) fn validate_arguments(
     Ok(())
 }
 
+pub(crate) fn validate_argument_schemas(
+    pattern: &Pattern,
+    arguments: &BTreeMap<String, ArgumentSchema>,
+) -> Result<(), TroxValueError> {
+    if arguments.len() > MAX_ARGUMENTS {
+        return Err(TroxValueError::new(
+            "trox.argument-limit",
+            "message exceeds 256 arguments",
+        ));
+    }
+    let mut expected = BTreeSet::new();
+    collect_placeholders(pattern, &mut expected)?;
+    let actual: BTreeSet<_> = arguments.keys().cloned().collect();
+    if expected != actual {
+        return Err(TroxValueError::new(
+            "trox.argument-mismatch",
+            format!("placeholder declarations differ: expected {expected:?}, got {actual:?}"),
+        ));
+    }
+    for schema in arguments.values() {
+        if let ArgumentSchema::Term {
+            form: Some(form), ..
+        } = schema
+        {
+            validate_stable_id(form, "term form")?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_selectors(
     pattern: &Pattern,
     selectors: &[SelectorRecord],

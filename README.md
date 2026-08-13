@@ -39,7 +39,7 @@ Trox provides:
 - Inline complete English messages.
 - Named placeholders in Rust and TypeScript.
 - Exact, cardinal, ordinal, and semantic selection.
-- Static RON message extraction.
+- RON message and typed-template extraction.
 - Locale-specific row expansion.
 - Non-destructive CSV synchronization.
 - Deterministic JSON bundles.
@@ -619,7 +619,8 @@ scanner handles `.ts` and `.tsx` without module resolution.
 
 ## RON source extraction
 
-RON is limited to flat static messages:
+RON supports flat static messages and text templates with explicitly typed
+placeholders:
 
 ```ron
 (
@@ -634,6 +635,14 @@ RON is limited to flat static messages:
         meaning: "open-state",
         description: "Status for a room accepting players.",
     ),
+    deck_summary: Tx(
+        text: "Deck: {deck_name} ({count})",
+        description: "Deck label followed by its card count.",
+        placeholders: {
+            "deck_name": Opaque,
+            "count": Scalar,
+        },
+    ),
 )
 ```
 
@@ -643,13 +652,18 @@ Rules:
 - Use the short `Tx("text")` form for plain static text.
 - Use the named form when supplying `description` or `meaning`; `text` is
   required.
-- `description` and `meaning` are optional named fields.
+- `description`, `meaning`, and `placeholders` are optional named fields.
+- Every placeholder in `text` must have exactly one declaration. Use `Scalar`
+  for text, finite numbers, or booleans; `Opaque` for an atomic localized
+  value; and `Term(form: "counted", number: true)` for a term with an exact
+  form and number-presence contract.
 - Generated descriptions include the structural RON field path, such as
   `Path: CardDefinition.ability_text`. Array indexes are omitted so every value
   in the same field shares a stable path.
 - Unwrapped strings are ignored.
-- Placeholders and selectors are rejected.
-- Argument maps, terms, and opaque values are rejected.
+- Selectors are rejected. RON templates are text patterns only.
+- Runtime argument values are not embedded in RON; only their schemas are
+  declared.
 - `{{` and `}}` render visible braces.
 
 Rejected by source extraction:
@@ -657,7 +671,8 @@ Rejected by source extraction:
 ```ron
 (
     ignored: "Close deck browser",
-    placeholder: Tx(text: "Deck: {deck_name}"),
+    undeclared: Tx(text: "Deck: {deck_name}"),
+    extra: Tx(text: "Deck", placeholders: { "deck_name": Opaque }),
 )
 ```
 
@@ -696,10 +711,30 @@ assert_eq!(decoded, record);
 ```
 
 This application-data representation uses the same `Tx` forms as source
-extraction. It supports only flat static values. A value without a meaning
-serializes as `Tx("Foo")`; a value with a meaning uses the named form
-`Tx(text: "Open", meaning: "open-state")` so the meaning survives the round
-trip. Dynamic patterns, arguments, and selectors return a serialization error.
+extraction. A value without a meaning serializes as `Tx("Foo")`; a value with
+a meaning uses the named form `Tx(text: "Open", meaning: "open-state")` so the
+meaning survives the round trip. Selectors and already-bound dynamic values
+return a RON serialization error.
+
+A placeholder-bearing `Tx` deserializes as an unbound template. Bind its
+runtime values before canonical serialization or localization:
+
+```rust
+let template: LocalizedString = ron::from_str(
+    r#"Tx(
+        text: "Deck: {deck_name} ({count})",
+        placeholders: { "deck_name": Opaque, "count": Scalar },
+    )"#,
+)?;
+let value = template.bind_ron_template(tx_args![
+    deck_name => opaque(tx("Night Garden", "Deck name.")),
+    count => 40_u32,
+])?;
+let rendered = localizer.resolve_checked(&value)?;
+```
+
+The bound argument names and kinds must exactly match their declarations. Term
+bindings must also match the declared form and whether a number is present.
 
 Descriptions do not round-trip through `LocalizedString`. They are authoring
 metadata and are not retained in the runtime value or message identity. For

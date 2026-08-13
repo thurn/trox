@@ -1,9 +1,51 @@
+use std::collections::BTreeMap;
+
 use serde::ser::{Error as _, SerializeStructVariant};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::{LocalizedString, Pattern, TroxValueError, tx_owned};
+use crate::{
+    ArgumentSchema, IdentityDescriptor, LocalizedString, Pattern, TroxValueError, tx_owned,
+};
 
-/// The checked payload of RON's static `Tx(text: ..., ...)` authoring variant.
+/// Declared runtime value category for a placeholder in a RON `Tx` template.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RonPlaceholder {
+    /// Text, a finite number, or a boolean value.
+    Scalar,
+    /// An atomic nested localized value.
+    Opaque,
+    /// A project term with an exact form and number-presence contract.
+    Term {
+        /// Requested named form, or the term default when omitted.
+        #[serde(default, deserialize_with = "plain_optional")]
+        form: Option<String>,
+        /// Whether the term binding requires a cardinal number.
+        #[serde(default)]
+        number: bool,
+    },
+}
+
+impl From<RonPlaceholder> for ArgumentSchema {
+    fn from(value: RonPlaceholder) -> Self {
+        match value {
+            RonPlaceholder::Scalar => Self::Scalar,
+            RonPlaceholder::Opaque => Self::Opaque,
+            RonPlaceholder::Term { form, number } => Self::Term { form, number },
+        }
+    }
+}
+
+impl From<ArgumentSchema> for RonPlaceholder {
+    fn from(value: ArgumentSchema) -> Self {
+        match value {
+            ArgumentSchema::Scalar => Self::Scalar,
+            ArgumentSchema::Opaque => Self::Opaque,
+            ArgumentSchema::Term { form, number } => Self::Term { form, number },
+        }
+    }
+}
+
+/// The checked payload of RON's `Tx(text: ..., ...)` authoring variant.
 ///
 /// Applications normally embed this as the payload for their own enum variant;
 /// the CLI scanner recognizes the conventional `Tx` spelling independently.
@@ -18,6 +60,9 @@ pub struct RonTx {
     /// Optional semantic discriminator used when computing message identity.
     #[serde(default, deserialize_with = "plain_optional")]
     pub meaning: Option<String>,
+    /// Unbound placeholder schemas for a source template.
+    #[serde(default)]
+    pub placeholders: BTreeMap<String, RonPlaceholder>,
 }
 
 fn plain_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -44,6 +89,8 @@ enum NamedRonLocalizedString {
         description: Option<String>,
         #[serde(default, deserialize_with = "plain_optional")]
         meaning: Option<String>,
+        #[serde(default)]
+        placeholders: BTreeMap<String, RonPlaceholder>,
     },
 }
 
@@ -55,22 +102,24 @@ enum PositionalRonLocalizedString {
 impl<'de> Deserialize<'de> for LocalizedString {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = Box::<ron::value::RawValue>::deserialize(deserializer)?;
-        let (text, description, meaning) =
+        let (text, description, meaning, placeholders) =
             match ron::from_str::<PositionalRonLocalizedString>(raw.get_ron()) {
-                Ok(PositionalRonLocalizedString::Tx(text)) => (text, None, None),
+                Ok(PositionalRonLocalizedString::Tx(text)) => (text, None, None, BTreeMap::new()),
                 Err(_) => {
                     let NamedRonLocalizedString::Tx {
                         text,
                         description,
                         meaning,
+                        placeholders,
                     } = ron::from_str(raw.get_ron()).map_err(serde::de::Error::custom)?;
-                    (text, description, meaning)
+                    (text, description, meaning, placeholders)
                 }
             };
         RonTx {
             text,
             description,
             meaning,
+            placeholders,
         }
         .into_localized_string()
         .map_err(serde::de::Error::custom)
@@ -79,6 +128,35 @@ impl<'de> Deserialize<'de> for LocalizedString {
 
 impl Serialize for LocalizedString {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if let Some(arguments) = self.ron_template_arguments() {
+            if !self.selectors().is_empty() {
+                return Err(S::Error::custom(
+                    "RON Tx templates do not support selectors",
+                ));
+            }
+            let Pattern::Text { text } = &self.identity().pattern else {
+                return Err(S::Error::custom(
+                    "RON Tx templates support only text patterns",
+                ));
+            };
+            let placeholders: BTreeMap<String, RonPlaceholder> = arguments
+                .iter()
+                .map(|(name, schema)| (name.clone(), schema.clone().into()))
+                .collect();
+            let fields = if self.identity().meaning.is_some() {
+                3
+            } else {
+                2
+            };
+            let mut variant =
+                serializer.serialize_struct_variant("LocalizedString", 0, "Tx", fields)?;
+            variant.serialize_field("text", text)?;
+            if let Some(meaning) = self.identity().meaning.as_deref() {
+                variant.serialize_field("meaning", meaning)?;
+            }
+            variant.serialize_field("placeholders", &placeholders)?;
+            return variant.end();
+        }
         if !self.arguments().is_empty() || !self.selectors().is_empty() {
             return Err(S::Error::custom(
                 "RON Tx serialization supports only static text values",
@@ -107,7 +185,20 @@ impl RonTx {
     /// The description is authoring metadata and is intentionally not retained
     /// in the runtime value or used to compute its identity.
     pub fn into_localized_string(self) -> Result<LocalizedString, TroxValueError> {
-        tx_owned(self.text, self.meaning)
+        if self.placeholders.is_empty() {
+            return tx_owned(self.text, self.meaning);
+        }
+        LocalizedString::build_ron_template(
+            IdentityDescriptor {
+                identity_version: 1,
+                meaning: self.meaning,
+                pattern: Pattern::Text { text: self.text },
+            },
+            self.placeholders
+                .into_iter()
+                .map(|(name, schema)| (name, schema.into()))
+                .collect(),
+        )
     }
 }
 
@@ -127,6 +218,47 @@ mod tests {
             omitted,
             crate::tx("Close", "Description does not enter identity.")
         );
+    }
+
+    #[test]
+    fn ron_placeholder_template_round_trips_and_binds() {
+        let source = r#"Tx(text:"Deck: {deck_name} ({count})",placeholders:{"count":Scalar,"deck_name":Opaque})"#;
+        let template: LocalizedString = ron::from_str(source).unwrap();
+        assert!(!template.is_atomic());
+        assert_eq!(
+            template.ron_template_arguments().unwrap(),
+            &BTreeMap::from([
+                ("count".into(), ArgumentSchema::Scalar),
+                ("deck_name".into(), ArgumentSchema::Opaque),
+            ])
+        );
+        assert_eq!(ron::to_string(&template).unwrap(), source);
+        assert!(matches!(
+            template.to_canonical_json(),
+            Err(crate::SerializeError::UnboundRonTemplate)
+        ));
+
+        let deck_name = crate::tx("Night Garden", "Deck name.");
+        let bound = template
+            .bind_ron_template(crate::tx_args![
+                count => 3_u32,
+                deck_name => crate::opaque(deck_name),
+            ])
+            .unwrap();
+        assert!(bound.to_canonical_json().is_ok());
+
+        let wrong_kind = template
+            .bind_ron_template(crate::tx_args![
+                count => crate::opaque(crate::tx("Three", "Count.")),
+                deck_name => crate::opaque(crate::tx("Night Garden", "Deck name.")),
+            ])
+            .unwrap_err();
+        assert_eq!(wrong_kind.code, "trox.argument-mismatch");
+
+        let missing = template
+            .bind_ron_template(crate::tx_args![count => 3_u32])
+            .unwrap_err();
+        assert_eq!(missing.code, "trox.argument-mismatch");
     }
 
     #[test]
@@ -159,6 +291,17 @@ mod tests {
         let error =
             ron::from_str::<LocalizedString>(r#"Tx(text:"Deck: {deck_name}")"#).unwrap_err();
         assert!(error.to_string().contains("argument-mismatch"));
+    }
+
+    #[test]
+    fn ron_rejects_placeholder_declaration_mismatches() {
+        for source in [
+            r#"Tx(text:"Deck: {deck_name}",placeholders:{"other":Opaque})"#,
+            r#"Tx(text:"Deck",placeholders:{"deck_name":Opaque})"#,
+        ] {
+            let error = ron::from_str::<LocalizedString>(source).unwrap_err();
+            assert!(error.to_string().contains("argument-mismatch"), "{error}");
+        }
     }
 
     #[test]

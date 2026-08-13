@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::canonical::{canonical_json, short_id, signature};
 use crate::model::{
-    Argument, IdentityDescriptor, IntoArgument, Pattern, SelectorRecord, Version,
-    validate_arguments, validate_identity, validate_selectors,
+    Argument, ArgumentSchema, IdentityDescriptor, IntoArgument, Pattern, SelectorRecord, Version,
+    validate_argument_schemas, validate_arguments, validate_identity, validate_selectors,
 };
 use crate::pattern::ASSERT_LOCALIZED_MEANING;
 use crate::{SerializeError, TroxValueError};
@@ -41,6 +41,7 @@ pub struct LocalizedString {
 #[derive(Debug, Clone)]
 struct LocalizedStringData {
     arguments: BTreeMap<String, Argument>,
+    ron_template_arguments: Option<BTreeMap<String, ArgumentSchema>>,
     identity: IdentityDescriptor,
     selectors: Vec<SelectorRecord>,
     identity_ids: OnceLock<IdentityIds>,
@@ -77,6 +78,7 @@ impl fmt::Debug for LocalizedString {
         formatter
             .debug_struct("LocalizedString")
             .field("arguments", &self.data.arguments)
+            .field("ron_template_arguments", &self.data.ron_template_arguments)
             .field("identity", &self.data.identity)
             .field("selectors", &self.data.selectors)
             .finish()
@@ -86,6 +88,7 @@ impl fmt::Debug for LocalizedString {
 impl PartialEq for LocalizedString {
     fn eq(&self, other: &Self) -> bool {
         self.data.arguments == other.data.arguments
+            && self.data.ron_template_arguments == other.data.ron_template_arguments
             && self.data.identity == other.data.identity
             && self.data.selectors == other.data.selectors
     }
@@ -137,6 +140,7 @@ impl LocalizedString {
         Ok(Self {
             data: Arc::new(LocalizedStringData {
                 arguments,
+                ron_template_arguments: None,
                 identity,
                 selectors,
                 identity_ids,
@@ -155,6 +159,7 @@ impl LocalizedString {
         Self {
             data: Arc::new(LocalizedStringData {
                 arguments: wire.arguments,
+                ron_template_arguments: None,
                 identity: wire.identity,
                 selectors: wire.selectors,
                 identity_ids,
@@ -182,6 +187,32 @@ impl LocalizedString {
         &self.data.arguments
     }
 
+    /// Returns the declared schemas when this value is an unbound RON template.
+    ///
+    /// Ordinary runtime values return `None`. RON templates must be bound with
+    /// [`Self::bind_ron_template`] before canonical serialization or resolution.
+    pub fn ron_template_arguments(&self) -> Option<&BTreeMap<String, ArgumentSchema>> {
+        self.data.ron_template_arguments.as_ref()
+    }
+
+    /// Binds runtime arguments to a placeholder-bearing RON template.
+    ///
+    /// The argument names and kinds must exactly match the declarations in the
+    /// source `Tx` value.
+    pub fn bind_ron_template(
+        &self,
+        arguments: BTreeMap<String, Argument>,
+    ) -> Result<Self, TroxValueError> {
+        let Some(schemas) = self.data.ron_template_arguments.as_ref() else {
+            return Err(TroxValueError::new(
+                "trox.not-ron-template",
+                "localized value is not an unbound RON template",
+            ));
+        };
+        validate_bound_schemas(schemas, &arguments)?;
+        Self::build(self.data.identity.clone(), arguments, vec![])
+    }
+
     /// Returns runtime selector values in canonical path order.
     pub fn selectors(&self) -> &[SelectorRecord] {
         &self.data.selectors
@@ -191,6 +222,7 @@ impl LocalizedString {
     pub fn is_atomic(&self) -> bool {
         matches!(self.data.identity.pattern, Pattern::Text { .. })
             && self.data.arguments.is_empty()
+            && self.data.ron_template_arguments.is_none()
             && self.data.selectors.is_empty()
     }
 
@@ -198,6 +230,7 @@ impl LocalizedString {
         self.data.identity.meaning.as_deref() == Some(ASSERT_LOCALIZED_MEANING)
             && matches!(self.data.identity.pattern, Pattern::Text { .. })
             && self.data.arguments.is_empty()
+            && self.data.ron_template_arguments.is_none()
             && self.data.selectors.is_empty()
     }
 
@@ -213,6 +246,9 @@ impl LocalizedString {
 
     /// Serializes this value as RFC 8785 canonical JSON.
     pub fn to_canonical_json(&self) -> Result<String, SerializeError> {
+        if self.data.ron_template_arguments.is_some() {
+            return Err(SerializeError::UnboundRonTemplate);
+        }
         let ids = self.data.ids();
         canonical_json(&LocalizedStringWireRef {
             arguments: &self.data.arguments,
@@ -240,6 +276,67 @@ impl LocalizedString {
             source_signature: ids.source_signature,
             version: Version::V1,
         }
+    }
+}
+
+fn validate_bound_schemas(
+    schemas: &BTreeMap<String, ArgumentSchema>,
+    arguments: &BTreeMap<String, Argument>,
+) -> Result<(), TroxValueError> {
+    if schemas.len() != arguments.len() {
+        return Err(TroxValueError::new(
+            "trox.argument-mismatch",
+            "bound RON template arguments differ from its declarations",
+        ));
+    }
+    for (name, schema) in schemas {
+        let Some(argument) = arguments.get(name) else {
+            return Err(TroxValueError::new(
+                "trox.argument-mismatch",
+                format!("bound RON template argument `{name}` is missing"),
+            ));
+        };
+        let compatible = match (schema, argument) {
+            (
+                ArgumentSchema::Scalar,
+                Argument::Text { .. } | Argument::Number { .. } | Argument::Boolean { .. },
+            )
+            | (ArgumentSchema::Opaque, Argument::Opaque { .. }) => true,
+            (
+                ArgumentSchema::Term {
+                    form: expected_form,
+                    number: expected_number,
+                },
+                Argument::Term { form, number, .. },
+            ) => expected_form == form && *expected_number == number.is_some(),
+            _ => false,
+        };
+        if !compatible {
+            return Err(TroxValueError::new(
+                "trox.argument-mismatch",
+                format!("bound RON template argument `{name}` has the wrong kind"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+impl LocalizedString {
+    pub(crate) fn build_ron_template(
+        identity: IdentityDescriptor,
+        arguments: BTreeMap<String, ArgumentSchema>,
+    ) -> Result<Self, TroxValueError> {
+        validate_identity(&identity)?;
+        validate_argument_schemas(&identity.pattern, &arguments)?;
+        Ok(Self {
+            data: Arc::new(LocalizedStringData {
+                arguments: BTreeMap::new(),
+                ron_template_arguments: Some(arguments),
+                identity,
+                selectors: vec![],
+                identity_ids: OnceLock::new(),
+            }),
+        })
     }
 }
 

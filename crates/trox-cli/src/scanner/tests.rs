@@ -146,6 +146,74 @@ fn extracts_short_and_named_ron_tx_forms_equivalently() {
 }
 
 #[test]
+fn extracts_typed_placeholders_from_ron_tx_templates() {
+    let result = scan(
+        r#"CardDefinition(label: Tx(
+            text: "Deck: {deck_name}; {count}; {card}",
+            placeholders: {
+                "deck_name": Opaque,
+                "count": Scalar,
+                "card": Term(form: "counted", number: true),
+            },
+        ))"#,
+        Language::Ron,
+    );
+
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(result.messages.len(), 1);
+    assert_eq!(
+        result.messages[0].arguments,
+        BTreeMap::from([
+            (
+                "card".into(),
+                ArgumentSchema::Term {
+                    form: Some("counted".into()),
+                    number: true,
+                },
+            ),
+            ("count".into(), ArgumentSchema::Scalar),
+            ("deck_name".into(), ArgumentSchema::Opaque),
+        ])
+    );
+    assert_eq!(
+        result.messages[0].term_ids,
+        BTreeMap::from([("card".into(), None)])
+    );
+    assert_eq!(
+        result.messages[0].ron_path.as_deref(),
+        Some("CardDefinition.label")
+    );
+}
+
+#[test]
+fn rejects_invalid_ron_placeholder_declarations() {
+    for (source, rule) in [
+        (
+            r#"Tx(text: "Deck: {deck_name}", placeholders: {"other": Opaque})"#,
+            "trox.argument-mismatch",
+        ),
+        (
+            r#"Tx(text: "Deck: {deck_name}", placeholders: {"deck_name": Unknown})"#,
+            "trox.ron-placeholders",
+        ),
+        (
+            r#"Tx(text: "Deck: {deck_name}", placeholders: {"deck_name": Term(form: "Bad Form")})"#,
+            "trox.invalid-term-form",
+        ),
+    ] {
+        let result = scan(source, Language::Ron);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.rule_id == rule),
+            "{source}: {:?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
 fn extracts_nested_typescript() {
     let result = scan(
         r#"txa(select(owner, [when("player", plural(count, [one("{count} card"), other("{count} cards")])), otherwise("None")]), { count }, "Status.")"#,
@@ -196,7 +264,7 @@ fn reports_sound_source_contract_violations() {
             r#"txa("Deck: {deck_name}", { other_name: deck_name }, "Description.")"#,
             "trox.argument-mismatch",
         ),
-        (r#"Tx(text: "Deck: {deck_name}")"#, "trox.ron-placeholder"),
+        (r#"Tx(text: "Deck: {deck_name}")"#, "trox.argument-mismatch"),
     ] {
         let language = if source.starts_with("Tx") {
             Language::Ron
