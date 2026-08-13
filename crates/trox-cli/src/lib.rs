@@ -5,6 +5,7 @@ pub mod config;
 pub mod csv_workflow;
 pub mod diagnostic;
 pub mod extract;
+pub mod handoff;
 pub mod locale_plan;
 pub mod scanner;
 pub mod transaction;

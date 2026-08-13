@@ -1,6 +1,7 @@
 use std::fs;
 
 use assert_cmd::Command;
+use calamine::{Reader, Xlsx, open_workbook};
 use predicates::prelude::PredicateBooleanExt;
 use tempfile::tempdir;
 use trox::prelude::*;
@@ -23,6 +24,58 @@ fn copy_dir(source: &std::path::Path, target: &std::path::Path) {
             fs::copy(entry.path(), output).unwrap();
         }
     }
+}
+
+#[test]
+fn handoff_export_and_import_round_trip_the_current_active_catalog() {
+    let fixture = copy_fixture();
+    let config = fixture.path().join("trox.ron");
+    Command::cargo_bin("trox")
+        .unwrap()
+        .args(["--config", config.to_str().unwrap(), "extract"])
+        .assert()
+        .success();
+    let csv_path = fixture.path().join("locales/es.csv");
+    let before = fs::read(&csv_path).unwrap();
+
+    Command::cargo_bin("trox")
+        .unwrap()
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "handoff",
+            "export",
+            "--locale",
+            "es",
+            "--output",
+            "handoff/es.xlsx",
+        ])
+        .assert()
+        .success();
+
+    let workbook_path = fixture.path().join("handoff/es.xlsx");
+    let mut workbook: Xlsx<_> = open_workbook(&workbook_path).unwrap();
+    let translations = workbook.worksheet_range("Translations").unwrap();
+    let csv_rows = csv::Reader::from_reader(before.as_slice())
+        .records()
+        .count();
+    assert_eq!(translations.height().saturating_sub(1), csv_rows);
+
+    Command::cargo_bin("trox")
+        .unwrap()
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "handoff",
+            "import",
+            "--locale",
+            "es",
+            "--input",
+            "handoff/es.xlsx",
+        ])
+        .assert()
+        .success();
+    assert_eq!(fs::read(csv_path).unwrap(), before);
 }
 
 #[test]

@@ -5,13 +5,16 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use trox_cli::bundle_build::{LocaleArtifacts, build_source_bundle, build_target_bundle};
+use trox_cli::bundle_build::{
+    LocaleArtifacts, build_source_bundle, build_target_bundle, source_fingerprint,
+};
 use trox_cli::config::{LintLevel, ProjectConfig};
-use trox_cli::csv_workflow::{prune, synchronize};
+use trox_cli::csv_workflow::{apply_translator_edits, prune, synchronize};
 use trox_cli::diagnostic::{Diagnostic, DiagnosticResultExt, Diagnostics, classified_diagnostic};
 use trox_cli::extract::{
     LocaleProfile, ProfileDirection, ProfileIsolation, build_catalog, expand_rows,
 };
+use trox_cli::handoff::{export_workbook, import_workbook, write_workbook};
 use trox_cli::locale_plan::LocalePlan;
 use trox_cli::transaction::{atomic_replace_all, recover_pending_transaction};
 
@@ -73,6 +76,11 @@ enum Command {
         #[command(subcommand)]
         command: LocaleCommand,
     },
+    /// Export or import a curated translator workbook.
+    Handoff {
+        #[command(subcommand)]
+        command: HandoffCommand,
+    },
     /// Measure scanner throughput over the configured corpus.
     Benchmark {
         #[arg(long, default_value_t = 5)]
@@ -90,6 +98,24 @@ enum Command {
 enum LocaleCommand {
     /// Create the configured locale profile and initial CSV.
     Init { locale: String },
+}
+
+#[derive(Debug, Subcommand)]
+enum HandoffCommand {
+    /// Export active rows to a protected .xlsx translator workbook.
+    Export {
+        #[arg(long)]
+        locale: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Verify and merge a returned translator workbook into the canonical CSV.
+    Import {
+        #[arg(long)]
+        locale: String,
+        #[arg(long)]
+        input: PathBuf,
+    },
 }
 
 fn main() {
@@ -151,6 +177,18 @@ fn run(cli: &Cli) -> Result<()> {
         } => (
             "trox.locale-init",
             command_locale_init(&config, locale, cli.json),
+        ),
+        Command::Handoff {
+            command: HandoffCommand::Export { locale, output },
+        } => (
+            "trox.handoff-export",
+            command_handoff_export(&config, locale, output, cli.json),
+        ),
+        Command::Handoff {
+            command: HandoffCommand::Import { locale, input },
+        } => (
+            "trox.handoff-import",
+            command_handoff_import(&config, locale, input, cli.json),
         ),
         Command::Benchmark {
             iterations,
@@ -405,6 +443,125 @@ fn command_prune(config: &ProjectConfig, requested: &[String], json: bool) -> Re
     }
     atomic_replace_all(&config.root, &replacements)?;
     eprintln!("pruned obsolete rows from {} CSV(s)", replacements.len());
+    Ok(())
+}
+
+fn command_handoff_export(
+    config: &ProjectConfig,
+    locale: &str,
+    output: &std::path::Path,
+    json: bool,
+) -> Result<()> {
+    require_xlsx_path(output)?;
+    let output = config.resolve(output);
+    let mut diagnostics = Diagnostics::default();
+    let model = build_catalog(config, &mut diagnostics)?;
+    let locale_plan = LocalePlan::load(config, &[locale.to_owned()])?;
+    let rows = expand_rows(
+        config,
+        &model,
+        locale,
+        locale_plan.profile(locale),
+        &mut diagnostics,
+    )?;
+    let csv_path = config.resolve(&config.locales[locale].csv);
+    let sync = synchronize(&csv_path, &rows, false, &mut diagnostics)?;
+    if sync.changed {
+        diagnostics.push(Diagnostic::error(
+            "trox.csv-out-of-date",
+            format!(
+                "{} is out of date; run trox extract --locale {locale}",
+                csv_path.display()
+            ),
+        ));
+    }
+    apply_lint_policy(config, false, &mut diagnostics);
+    emit_diagnostics(&diagnostics, json)?;
+    if diagnostics.has_errors() {
+        bail!("handoff export aborted before writing files");
+    }
+    let fingerprint = source_fingerprint(config, &model)?;
+    let active_rows = sync
+        .document
+        .rows
+        .iter()
+        .filter(|row| row.status != "obsolete")
+        .count();
+    let workbook = export_workbook(locale, &config.source_locale, &fingerprint, &sync.document)?;
+    write_workbook(&output, &workbook)?;
+    eprintln!(
+        "exported {active_rows} active row(s) for {locale} to {}",
+        output.display()
+    );
+    Ok(())
+}
+
+fn command_handoff_import(
+    config: &ProjectConfig,
+    locale: &str,
+    input: &std::path::Path,
+    json: bool,
+) -> Result<()> {
+    require_xlsx_path(input)?;
+    let input = config.resolve(input);
+    let mut diagnostics = Diagnostics::default();
+    let model = build_catalog(config, &mut diagnostics)?;
+    let locale_plan = LocalePlan::load(config, &[locale.to_owned()])?;
+    let rows = expand_rows(
+        config,
+        &model,
+        locale,
+        locale_plan.profile(locale),
+        &mut diagnostics,
+    )?;
+    let csv_path = config.resolve(&config.locales[locale].csv);
+    let sync = synchronize(&csv_path, &rows, false, &mut diagnostics)?;
+    if sync.changed {
+        diagnostics.push(Diagnostic::error(
+            "trox.csv-out-of-date",
+            format!(
+                "{} is out of date; run trox extract --locale {locale}",
+                csv_path.display()
+            ),
+        ));
+    }
+    apply_lint_policy(config, false, &mut diagnostics);
+    emit_diagnostics(&diagnostics, json)?;
+    if diagnostics.has_errors() {
+        bail!("handoff import aborted before reading translations");
+    }
+    let fingerprint = source_fingerprint(config, &model)?;
+    let edits = import_workbook(
+        &input,
+        locale,
+        &config.source_locale,
+        &fingerprint,
+        &sync.document,
+    )?;
+    let mut import_diagnostics = Diagnostics::default();
+    let csv = apply_translator_edits(&csv_path, &sync.document, &edits, &mut import_diagnostics)?;
+    apply_lint_policy(config, false, &mut import_diagnostics);
+    emit_diagnostics(&import_diagnostics, json)?;
+    if import_diagnostics.has_errors() {
+        bail!("handoff import rejected one or more translations");
+    }
+    atomic_replace_all(&config.root, &[(csv_path.clone(), csv)])?;
+    eprintln!(
+        "imported {} active row(s) for {locale} into {}",
+        edits.len(),
+        csv_path.display()
+    );
+    Ok(())
+}
+
+fn require_xlsx_path(path: &std::path::Path) -> Result<()> {
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_none_or(|extension| !extension.eq_ignore_ascii_case("xlsx"))
+    {
+        bail!("translator handoff path must end in .xlsx");
+    }
     Ok(())
 }
 

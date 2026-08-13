@@ -901,6 +901,10 @@ trox bundle --allow-missing
 
 # Remove reviewed obsolete rows.
 trox prune --locale es
+
+# Create and merge a curated translator workbook.
+trox handoff export --locale es --output localization/handoff/es.xlsx
+trox handoff import --locale es --input localization/handoff/es.xlsx
 ```
 
 Extraction is transactional:
@@ -941,6 +945,21 @@ english,description,translation
 Managed IDs are tool-owned. Selector conditions are included in the description
 so translators can read all source context in one column; translators edit
 surface text and notes, not selectors.
+
+For an external translator, use `trox handoff export` instead of sending the
+canonical CSV. The `.xlsx` handoff contains active rows only; obsolete rows and
+unknown workflow columns remain in the canonical CSV as translation memory.
+Only the Translation and Translator note columns are editable. Managed metadata
+is hidden and protected, and every cell is written as spreadsheet text so source
+strings beginning with `=`, `+`, `-`, or `@` cannot become formulas.
+
+`trox handoff import` rejects formulas, added or removed rows and columns,
+modified IDs, source metadata, or placeholder declarations, a changed source
+catalog, and canonical CSV edits made after export. Imported translations also
+run the project's normal placeholder and localization lint policy. A hidden
+manifest binds the workbook to the locale, source locale, active row set, and
+catalog fingerprint. Worksheet protection is for editing guidance; import
+validation is the integrity boundary.
 
 Condition examples:
 

@@ -70,7 +70,11 @@ impl CsvRow {
     ) -> Self {
         let get = |index| record.get(index).unwrap_or("").to_owned();
         let offset = usize::from(legacy_conditions_column);
-        let conditions = legacy_conditions_column.then(|| get(3)).unwrap_or_default();
+        let conditions = if legacy_conditions_column {
+            get(3)
+        } else {
+            String::new()
+        };
         let mut description = get(1);
         if !conditions.is_empty() {
             if !description.is_empty() {
@@ -124,6 +128,12 @@ impl CsvRow {
 pub struct CsvDocument {
     pub extra_headers: Vec<String>,
     pub rows: Vec<CsvRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranslatorEdit {
+    pub translation: String,
+    pub translator_note: String,
 }
 
 impl CsvDocument {
@@ -605,6 +615,37 @@ pub fn write_csv(document: &CsvDocument) -> Result<Vec<u8>> {
     Ok(writer.into_inner().map_err(|error| error.into_error())?)
 }
 
+pub fn apply_translator_edits(
+    path: &Path,
+    document: &CsvDocument,
+    edits: &BTreeMap<String, TranslatorEdit>,
+    diagnostics: &mut Diagnostics,
+) -> Result<Vec<u8>> {
+    let mut updated = document.clone();
+    let active_ids: BTreeSet<_> = updated
+        .rows
+        .iter()
+        .filter(|row| row.status != "obsolete")
+        .map(|row| row.row_id.clone())
+        .collect();
+    let edit_ids: BTreeSet<_> = edits.keys().cloned().collect();
+    if active_ids != edit_ids {
+        bail!("translator handoff rows do not match the active catalog");
+    }
+    for row in updated
+        .rows
+        .iter_mut()
+        .filter(|row| row.status != "obsolete")
+    {
+        let edit = &edits[&row.row_id];
+        row.translation.clone_from(&edit.translation);
+        row.translator_note.clone_from(&edit.translator_note);
+    }
+    derive_statuses(&mut updated.rows, false)?;
+    lint_rows(path, &updated.rows, diagnostics, false)?;
+    write_csv(&updated)
+}
+
 pub fn prune(
     path: &Path,
     expected: &[ExpectedRow],
@@ -692,6 +733,57 @@ mod tests {
         assert_eq!(second.document.rows[0].status, "stale");
         assert_eq!(second.document.rows[0].previous_translation, "Hola {name}");
         assert!(second.document.rows[0].translation.is_empty());
+    }
+
+    #[test]
+    fn translator_edits_update_active_rows_without_pruning_translation_memory() {
+        let path = Path::new("es.csv");
+        let mut obsolete = CsvRow {
+            row_id: "old".into(),
+            entry_id: "old_entry".into(),
+            status: "obsolete".into(),
+            translation: "Trabajo anterior".into(),
+            ..CsvRow::default()
+        };
+        obsolete.extras.push("reviewed".into());
+        let document = CsvDocument {
+            extra_headers: vec!["reviewer".into()],
+            rows: vec![
+                CsvRow {
+                    english: "Hello {name}".into(),
+                    translation: String::new(),
+                    status: "missing".into(),
+                    placeholders: "name".into(),
+                    entry_id: "entry".into(),
+                    row_id: "active".into(),
+                    extras: vec![String::new()],
+                    ..CsvRow::default()
+                },
+                obsolete,
+            ],
+        };
+        let edits = BTreeMap::from([(
+            "active".into(),
+            TranslatorEdit {
+                translation: "Hola {name}".into(),
+                translator_note: "Friendly.".into(),
+            },
+        )]);
+        let mut diagnostics = Diagnostics::default();
+
+        let bytes = apply_translator_edits(path, &document, &edits, &mut diagnostics).unwrap();
+        let directory = tempdir().unwrap();
+        let output = directory.path().join("es.csv");
+        fs::write(&output, bytes).unwrap();
+        let updated = read_csv(&output).unwrap();
+
+        assert_eq!(updated.rows[0].translation, "Hola {name}");
+        assert_eq!(updated.rows[0].translator_note, "Friendly.");
+        assert_eq!(updated.rows[0].status, "translated");
+        assert_eq!(updated.rows[1].status, "obsolete");
+        assert_eq!(updated.rows[1].translation, "Trabajo anterior");
+        assert_eq!(updated.rows[1].extras, ["reviewed"]);
+        assert!(!diagnostics.has_errors());
     }
 
     #[test]
