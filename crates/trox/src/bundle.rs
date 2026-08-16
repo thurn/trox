@@ -7,6 +7,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::AnnotatedLocalizedString;
 use crate::canonical::{canonical_json, short_id, signature};
 pub use crate::catalog::SourceCatalog;
 use crate::error::{DeserializeError, ResolveError};
@@ -305,6 +306,42 @@ pub struct ResolveOutcome {
     pub used_source_fallback: bool,
 }
 
+/// One display-ready run produced from a localized message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedLocalizedPart<'a, T> {
+    /// Translator-authored literal text between placeholders.
+    Literal {
+        /// Display-ready literal text.
+        value: String,
+    },
+    /// One occurrence of a named placeholder in the selected translation.
+    Placeholder {
+        /// Semantic placeholder name from the source message contract.
+        name: String,
+        /// Display-ready placeholder surface, including configured bidi isolation.
+        value: String,
+        /// Opaque application metadata associated with this placeholder, if any.
+        annotation: Option<&'a T>,
+    },
+}
+
+impl<T> ResolvedLocalizedPart<'_, T> {
+    fn value(&self) -> &str {
+        match self {
+            Self::Literal { value } | Self::Placeholder { value, .. } => value,
+        }
+    }
+}
+
+/// Structured resolution plus whether the complete message used source fallback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedLocalizedPartsOutcome<'a, T> {
+    /// Display-ready literal and placeholder runs in translated order.
+    pub parts: Vec<ResolvedLocalizedPart<'a, T>>,
+    /// True when no compatible target row could be used.
+    pub used_source_fallback: bool,
+}
+
 impl Bundle {
     /// Parses, canonical-encoding checks, and structurally validates bundle JSON.
     pub fn from_canonical_json(input: &str) -> Result<Self, DeserializeError> {
@@ -517,11 +554,9 @@ impl Localizer {
 
     /// Resolves only through the target row and returns the first failure.
     pub fn resolve_checked(&self, value: &LocalizedString) -> Result<String, ResolveError> {
-        if let Some(pattern) = value.asserted_localized_pattern() {
-            return self.interpolate(pattern, value, false);
-        }
-        let row = self.target_row(value)?;
-        self.interpolate(&row.translation, value, true)
+        let no_annotation = |_: &str| Option::<&()>::None;
+        self.resolve_parts_checked_with(value, &no_annotation)
+            .map(|parts| join_resolved_parts(&parts))
     }
 
     fn target_row<'a>(&'a self, value: &LocalizedString) -> Result<&'a BundleRow, ResolveError> {
@@ -555,96 +590,144 @@ impl Localizer {
 
     /// Resolves infallibly, emitting diagnostics and preserving visible recovery markers.
     pub fn resolve(&self, value: &LocalizedString) -> String {
-        if let Some(pattern) = value.asserted_localized_pattern() {
-            return self
-                .interpolate_recovering(pattern, value, false)
-                .map(|(text, _)| text)
-                .unwrap_or_else(|_| unreachable!("asserted-localized patterns are validated"));
-        }
-        match self.target_row(value) {
-            Ok(row) => match self.interpolate_recovering(&row.translation, value, true) {
-                Ok((text, _)) => text,
-                Err(error) => self.resolve_source_after(value, error).0,
-            },
-            Err(error) => self.resolve_source_after(value, error).0,
-        }
+        self.resolve_outcome(value).text
     }
 
     /// Resolves infallibly and reports whether the entire message fell back to source.
     pub fn resolve_outcome(&self, value: &LocalizedString) -> ResolveOutcome {
+        let no_annotation = |_: &str| Option::<&()>::None;
+        let outcome = self.resolve_parts_outcome_with(value, &no_annotation);
+        ResolveOutcome {
+            text: join_resolved_parts(&outcome.parts),
+            used_source_fallback: outcome.used_source_fallback,
+        }
+    }
+
+    /// Resolves an annotated value through the target row and returns the first failure.
+    pub fn resolve_parts_checked<'a, T>(
+        &self,
+        value: &'a AnnotatedLocalizedString<T>,
+    ) -> Result<Vec<ResolvedLocalizedPart<'a, T>>, ResolveError> {
+        let annotation_for = |name: &str| value.annotations().get(name);
+        self.resolve_parts_checked_with(value.localized(), &annotation_for)
+    }
+
+    /// Resolves annotated parts with the same diagnostics and source recovery as [`Self::resolve`].
+    pub fn resolve_parts<'a, T>(
+        &self,
+        value: &'a AnnotatedLocalizedString<T>,
+    ) -> Vec<ResolvedLocalizedPart<'a, T>> {
+        self.resolve_parts_outcome(value).parts
+    }
+
+    /// Resolves annotated parts and reports whether the complete message used source fallback.
+    pub fn resolve_parts_outcome<'a, T>(
+        &self,
+        value: &'a AnnotatedLocalizedString<T>,
+    ) -> ResolvedLocalizedPartsOutcome<'a, T> {
+        let annotation_for = |name: &str| value.annotations().get(name);
+        self.resolve_parts_outcome_with(value.localized(), &annotation_for)
+    }
+
+    fn resolve_parts_checked_with<'a, T, F>(
+        &self,
+        value: &LocalizedString,
+        annotation_for: &F,
+    ) -> Result<Vec<ResolvedLocalizedPart<'a, T>>, ResolveError>
+    where
+        F: Fn(&str) -> Option<&'a T>,
+    {
         if let Some(pattern) = value.asserted_localized_pattern() {
-            let text = self
-                .interpolate_recovering(pattern, value, false)
-                .map(|(text, _)| text)
+            return self.interpolate_parts(pattern, value, false, annotation_for);
+        }
+        let row = self.target_row(value)?;
+        self.interpolate_parts(&row.translation, value, true, annotation_for)
+    }
+
+    fn resolve_parts_outcome_with<'a, T, F>(
+        &self,
+        value: &LocalizedString,
+        annotation_for: &F,
+    ) -> ResolvedLocalizedPartsOutcome<'a, T>
+    where
+        F: Fn(&str) -> Option<&'a T>,
+    {
+        if let Some(pattern) = value.asserted_localized_pattern() {
+            let parts = self
+                .interpolate_parts_recovering(pattern, value, false, annotation_for)
                 .unwrap_or_else(|_| unreachable!("asserted-localized patterns are validated"));
-            return ResolveOutcome {
-                text,
+            return ResolvedLocalizedPartsOutcome {
+                parts,
                 used_source_fallback: false,
             };
         }
         match self.target_row(value) {
-            Ok(row) => match self.interpolate_recovering(&row.translation, value, true) {
-                Ok((text, _used_placeholder_recovery)) => ResolveOutcome {
-                    text,
+            Ok(row) => match self.interpolate_parts_recovering(
+                &row.translation,
+                value,
+                true,
+                annotation_for,
+            ) {
+                Ok(parts) => ResolvedLocalizedPartsOutcome {
+                    parts,
                     used_source_fallback: false,
                 },
-                Err(error) => {
-                    let (text, _) = self.resolve_source_after(value, error);
-                    ResolveOutcome {
-                        text,
-                        used_source_fallback: true,
-                    }
-                }
+                Err(error) => self.resolve_source_parts_after(value, error, annotation_for),
             },
-            Err(error) => {
-                let (text, _) = self.resolve_source_after(value, error);
-                ResolveOutcome {
-                    text,
+            Err(error) => self.resolve_source_parts_after(value, error, annotation_for),
+        }
+    }
+
+    fn resolve_source_parts_after<'a, T, F>(
+        &self,
+        value: &LocalizedString,
+        target_error: ResolveError,
+        annotation_for: &F,
+    ) -> ResolvedLocalizedPartsOutcome<'a, T>
+    where
+        F: Fn(&str) -> Option<&'a T>,
+    {
+        self.emit(resolve_diagnostic(value.entry_id(), &target_error));
+        match select_pattern(&self.source, value).and_then(|selection| {
+            self.interpolate_parts_recovering(&selection.text, value, false, annotation_for)
+        }) {
+            Ok(parts) => ResolvedLocalizedPartsOutcome {
+                parts,
+                used_source_fallback: true,
+            },
+            Err(source_error) => {
+                self.emit(resolve_diagnostic(value.entry_id(), &source_error));
+                ResolvedLocalizedPartsOutcome {
+                    parts: vec![ResolvedLocalizedPart::Literal {
+                        value: format!("⟦{}⟧", value.entry_id()),
+                    }],
                     used_source_fallback: true,
                 }
             }
         }
     }
 
-    fn resolve_source_after(
-        &self,
-        value: &LocalizedString,
-        target_error: ResolveError,
-    ) -> (String, bool) {
-        self.emit(resolve_diagnostic(value.entry_id(), &target_error));
-        match select_pattern(&self.source, value).and_then(|selection| {
-            self.interpolate_recovering(&selection.text, value, false)
-                .map(|(text, _)| PatternSelection {
-                    text,
-                    path: Vec::new(),
-                })
-        }) {
-            Ok(selection) => (selection.text, true),
-            Err(source_error) => {
-                self.emit(resolve_diagnostic(value.entry_id(), &source_error));
-                (format!("⟦{}⟧", value.entry_id()), true)
-            }
-        }
-    }
-
-    fn interpolate_recovering(
+    fn interpolate_parts_recovering<'a, T, F>(
         &self,
         pattern: &str,
         value: &LocalizedString,
         prefer_target_terms: bool,
-    ) -> Result<(String, bool), ResolveError> {
-        let mut output = String::with_capacity(pattern.len() + 16);
-        let mut used_source_fallback = false;
+        annotation_for: &F,
+    ) -> Result<Vec<ResolvedLocalizedPart<'a, T>>, ResolveError>
+    where
+        F: Fn(&str) -> Option<&'a T>,
+    {
+        let mut output = Vec::new();
         let bytes = pattern.as_bytes();
         let mut index = 0;
         while index < bytes.len() {
             if bytes[index] == b'{' && bytes.get(index + 1) == Some(&b'{') {
-                output.push('{');
+                push_literal(&mut output, '{');
                 index += 2;
                 continue;
             }
             if bytes[index] == b'}' && bytes.get(index + 1) == Some(&b'}') {
-                output.push('}');
+                push_literal(&mut output, '}');
                 index += 2;
                 continue;
             }
@@ -657,7 +740,6 @@ impl Localizer {
                 let name = &pattern[index + 1..index + 1 + end];
                 let surface = match value.arguments().get(name) {
                     None => {
-                        used_source_fallback = true;
                         self.emit(resolve_diagnostic(
                             value.entry_id(),
                             &ResolveError::MissingArgument { name: name.into() },
@@ -677,7 +759,6 @@ impl Localizer {
                         ) {
                             Ok(surface) => surface,
                             Err(error) => {
-                                used_source_fallback = true;
                                 self.emit(resolve_diagnostic(value.entry_id(), &error));
                                 self.source
                                     .terms
@@ -693,24 +774,18 @@ impl Localizer {
                     }
                     Some(Argument::Opaque { value }) => {
                         let nested = LocalizedString::from_validated_wire((**value).clone());
-                        let outcome = self.resolve_outcome(&nested);
-                        used_source_fallback |= outcome.used_source_fallback;
-                        outcome.text
+                        self.resolve(&nested)
                     }
                     Some(argument) => self
                         .argument_surface(argument, prefer_target_terms)
-                        .unwrap_or_else(|_| {
-                            used_source_fallback = true;
-                            format!("{{{name}}}")
-                        }),
+                        .unwrap_or_else(|_| format!("{{{name}}}")),
                 };
-                if self.target.isolation == IsolationPolicy::Isolate {
-                    output.push('\u{2068}');
-                    output.push_str(&surface);
-                    output.push('\u{2069}');
-                } else {
-                    output.push_str(&surface);
-                }
+                push_placeholder(
+                    &mut output,
+                    name,
+                    self.isolate_surface(surface),
+                    annotation_for(name),
+                );
                 index += end + 2;
                 continue;
             }
@@ -720,29 +795,33 @@ impl Localizer {
                 ));
             }
             let ch = pattern[index..].chars().next().expect("valid UTF-8");
-            output.push(ch);
+            push_literal(&mut output, ch);
             index += ch.len_utf8();
         }
-        Ok((output, used_source_fallback))
+        Ok(output)
     }
 
-    fn interpolate(
+    fn interpolate_parts<'a, T, F>(
         &self,
         pattern: &str,
         value: &LocalizedString,
         prefer_target_terms: bool,
-    ) -> Result<String, ResolveError> {
-        let mut output = String::with_capacity(pattern.len() + 16);
+        annotation_for: &F,
+    ) -> Result<Vec<ResolvedLocalizedPart<'a, T>>, ResolveError>
+    where
+        F: Fn(&str) -> Option<&'a T>,
+    {
+        let mut output = Vec::new();
         let bytes = pattern.as_bytes();
         let mut index = 0;
         while index < bytes.len() {
             match bytes[index] {
                 b'{' if bytes.get(index + 1) == Some(&b'{') => {
-                    output.push('{');
+                    push_literal(&mut output, '{');
                     index += 2;
                 }
                 b'}' if bytes.get(index + 1) == Some(&b'}') => {
-                    output.push('}');
+                    push_literal(&mut output, '}');
                     index += 2;
                 }
                 b'{' => {
@@ -755,13 +834,12 @@ impl Localizer {
                         .get(name)
                         .ok_or_else(|| ResolveError::MissingArgument { name: name.into() })?;
                     let surface = self.argument_surface(argument, prefer_target_terms)?;
-                    if self.target.isolation == IsolationPolicy::Isolate {
-                        output.push('\u{2068}');
-                        output.push_str(&surface);
-                        output.push('\u{2069}');
-                    } else {
-                        output.push_str(&surface);
-                    }
+                    push_placeholder(
+                        &mut output,
+                        name,
+                        self.isolate_surface(surface),
+                        annotation_for(name),
+                    );
                     index += end + 2;
                 }
                 b'}' => {
@@ -771,12 +849,20 @@ impl Localizer {
                 }
                 _ => {
                     let ch = pattern[index..].chars().next().expect("valid UTF-8");
-                    output.push(ch);
+                    push_literal(&mut output, ch);
                     index += ch.len_utf8();
                 }
             }
         }
         Ok(output)
+    }
+
+    fn isolate_surface(&self, surface: String) -> String {
+        if self.target.isolation == IsolationPolicy::Isolate {
+            format!("\u{2068}{surface}\u{2069}")
+        } else {
+            surface
+        }
     }
 
     fn argument_surface(
@@ -855,6 +941,33 @@ impl Localizer {
             invoke_diagnostic_hook(hook, diagnostic);
         }
     }
+}
+
+fn push_literal<'a, T>(parts: &mut Vec<ResolvedLocalizedPart<'a, T>>, ch: char) {
+    if let Some(ResolvedLocalizedPart::Literal { value }) = parts.last_mut() {
+        value.push(ch);
+    } else {
+        parts.push(ResolvedLocalizedPart::Literal {
+            value: ch.to_string(),
+        });
+    }
+}
+
+fn push_placeholder<'a, T>(
+    parts: &mut Vec<ResolvedLocalizedPart<'a, T>>,
+    name: &str,
+    value: String,
+    annotation: Option<&'a T>,
+) {
+    parts.push(ResolvedLocalizedPart::Placeholder {
+        name: name.to_owned(),
+        value,
+        annotation,
+    });
+}
+
+fn join_resolved_parts<T>(parts: &[ResolvedLocalizedPart<'_, T>]) -> String {
+    parts.iter().map(ResolvedLocalizedPart::value).collect()
 }
 
 fn invoke_diagnostic_hook(hook: &DiagnosticHook, diagnostic: Diagnostic) {

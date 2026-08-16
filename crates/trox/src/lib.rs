@@ -31,6 +31,7 @@
 
 #![warn(missing_docs)]
 
+mod annotated;
 mod bundle;
 mod canonical;
 mod catalog;
@@ -42,10 +43,11 @@ mod runtime;
 mod source_message;
 mod value;
 
+pub use annotated::AnnotatedLocalizedString;
 pub use bundle::{
     Bundle, BundleEntry, BundleRow, BundleTerm, BundleTermForm, BundleTermSurface, Diagnostic,
     DiagnosticCode, ExpansionDescriptor, IsolationPolicy, Localizer, NumberFormat, PluralRules,
-    ResolveOutcome, TextDirection,
+    ResolveOutcome, ResolvedLocalizedPart, ResolvedLocalizedPartsOutcome, TextDirection,
 };
 pub use catalog::SourceCatalog;
 pub use error::{DeserializeError, ResolveError, SerializeError, TroxValueError};
@@ -78,9 +80,9 @@ pub use value::LocalizedString;
 /// localization infrastructure.
 pub mod prelude {
     pub use crate::{
-        LocalizedString, Localizer, TermId, TroxSelector, assert_localized, counted, exact, few,
-        indefinite, many, meaning, one, opaque, ordinal, other, otherwise, plural, select, term,
-        two, tx, tx_args, txa, when, zero,
+        AnnotatedLocalizedString, LocalizedString, Localizer, ResolvedLocalizedPart, TermId,
+        TroxSelector, assert_localized, counted, exact, few, indefinite, many, meaning, one,
+        opaque, ordinal, other, otherwise, plural, select, term, two, tx, tx_args, txa, when, zero,
     };
 }
 

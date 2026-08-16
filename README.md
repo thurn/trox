@@ -475,6 +475,87 @@ facet, or deliberately centralized proper name.
 text leaf with no arguments or selectors. If it needs grammatical interaction,
 model it as a term.
 
+### Application-annotated placeholders
+
+Trox translations remain plain text. Translators cannot author HTML, Markdown,
+component syntax, or other interpreted rich-text markup. Applications can,
+however, attach opaque metadata to a message's existing named placeholders and
+use that metadata at the final presentation boundary. This is structured
+placeholder resolution, not rich-text parsing.
+
+In Rust, annotate a still-lazy `LocalizedString` without a `Localizer`:
+
+```rust
+use trox::prelude::*;
+
+#[derive(Debug)]
+struct EntityAnnotation {
+    entity_id: String,
+}
+
+let message = txa(
+    "Gain {offered_card}.",
+    tx_args![offered_card => opaque(card_name)],
+    "An effect granting the displayed card.",
+);
+let annotated = message.annotate([(
+    "offered_card",
+    EntityAnnotation { entity_id: "card-7".into() },
+)])?;
+
+let parts = localizer.resolve_parts_checked(&annotated)?;
+```
+
+Rust's `annotate` consumes the cheap-to-clone `LocalizedString` and accepts any
+`IntoIterator` of `(name, metadata)` pairs, including arrays, `Vec`, and owned
+`BTreeMap` values. Duplicate names are rejected instead of being silently
+overwritten.
+
+`ResolvedLocalizedPart::Literal` contains translator-authored literal runs.
+`ResolvedLocalizedPart::Placeholder` contains the semantic placeholder name,
+its display-ready localized surface, and `Option<&EntityAnnotation>`.
+
+The TypeScript lifecycle is equivalent:
+
+```ts
+const message = txa(
+  "Gain {offered_card}.",
+  { offered_card: opaque(cardName) },
+  "An effect granting the displayed card.",
+);
+const annotated = message.annotate({
+  offered_card: { kind: "entity", entityId: "card-7" },
+});
+
+const parts = localizer.resolvePartsChecked(annotated);
+```
+
+Construction, annotation, view-model storage, and application-layer transport
+remain locale independent. Only `resolve_parts_checked` / `resolvePartsChecked`
+and their recovering counterparts require the active `Localizer`. A target row
+may reorder, repeat, or omit declared placeholders: the part sequence follows
+that target row exactly, repeated occurrences reference the same annotation,
+and omitted occurrences produce no part. Other placeholders resolve normally
+with no annotation.
+
+Placeholder `value` fields are display-ready and include FSI/PDI controls when
+the bundle enables bidirectional isolation. Concatenating every part's `value`
+is therefore exactly equal to `resolve_checked` / `resolveChecked` (and likewise
+for recovering resolution). Scalar text, formatted numbers, terms, and opaque
+nested localized values use the same formatting and recovery path as ordinary
+string resolution.
+
+Annotations are application data, not localization data. The Rust wrapper owns
+its metadata and resolved parts borrow it; the TypeScript wrapper retains the
+application values by reference in a shallow-frozen name map. Neither wrapper
+implements Trox canonical serialization, and TypeScript `JSON.stringify`
+rejects it explicitly. To cross a process or persistence boundary, serialize
+the underlying `LocalizedString` through its existing canonical wire format and
+serialize application metadata through an application-owned protocol, then
+validate the names again by calling `.annotate(...)` on the decoded
+`LocalizedString`. Unknown annotation names fail immediately with
+`trox.unknown-annotation`.
+
 ### Resolution and rejected forms
 
 ```rust

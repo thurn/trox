@@ -1,6 +1,7 @@
 export * from "./runtime.js";
 export {
   LocalizedString,
+  AnnotatedLocalizedString,
   MAX_SAFE_SELECTOR_INTEGER,
   TermId,
   counted,

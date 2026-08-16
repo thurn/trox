@@ -8,6 +8,7 @@ import {
   CATEGORIES,
   CONSTRUCTION_TOKEN,
   ASSERT_LOCALIZED_MEANING,
+  AnnotatedLocalizedString,
   LocalizedString,
   argumentFrom,
   assertedLocalizedPattern,
@@ -86,6 +87,22 @@ export interface SourceMessageRef {
 }
 
 export interface Diagnostic { readonly code: string; readonly entry_id?: string; readonly message: string }
+
+/** One display-ready run produced from a localized message. */
+export type ResolvedLocalizedPart<T> =
+  | { readonly kind: "literal"; readonly value: string }
+  | {
+      readonly kind: "placeholder";
+      readonly name: string;
+      readonly value: string;
+      readonly annotation?: T;
+    };
+
+/** Structured resolution plus whether the complete message used source fallback. */
+export interface ResolvedLocalizedPartsOutcome<T> {
+  readonly parts: readonly ResolvedLocalizedPart<T>[];
+  readonly usedSourceFallback: boolean;
+}
 
 class CompiledBundle {
   readonly wire: Bundle;
@@ -310,19 +327,62 @@ export class Localizer {
   get sourceCatalog(): SourceCatalog { return this.#catalog; }
   localizedStringFromJSON(input: string): LocalizedString { return this.#catalog.localizedStringFromJSON(input); }
   resolveChecked(value: LocalizedString): string {
-    const assertedPattern = assertedLocalizedPattern(value);
-    if (assertedPattern !== undefined) return this.interpolate(assertedPattern, value, false);
-    const row = this.targetRow(value);
-    return this.interpolate(row.translation, value, true);
+    return joinParts(this.resolveValuePartsChecked(value));
   }
   resolve(value: LocalizedString): string {
+    return joinParts(this.resolveValueParts(value).parts);
+  }
+  /** Resolves an annotated value through the target row and returns the first failure. */
+  resolvePartsChecked<T>(value: AnnotatedLocalizedString<T>): readonly ResolvedLocalizedPart<T>[] {
+    return Object.freeze(this.resolveValuePartsChecked(
+      value.localized,
+      value.annotations,
+    ));
+  }
+  /** Resolves an annotated value with the same diagnostics and source recovery as resolve(). */
+  resolveParts<T>(value: AnnotatedLocalizedString<T>): readonly ResolvedLocalizedPart<T>[] {
+    return this.resolvePartsOutcome(value).parts;
+  }
+  /** Resolves structured parts and reports whether the complete message used source fallback. */
+  resolvePartsOutcome<T>(value: AnnotatedLocalizedString<T>): ResolvedLocalizedPartsOutcome<T> {
+    const outcome = this.resolveValueParts(value.localized, value.annotations);
+    return Object.freeze({ parts: Object.freeze(outcome.parts), usedSourceFallback: outcome.usedSourceFallback });
+  }
+  private resolveValuePartsChecked<T = never>(
+    value: LocalizedString,
+    annotations?: Readonly<Record<string, T>>,
+  ): ResolvedLocalizedPart<T>[] {
     const assertedPattern = assertedLocalizedPattern(value);
-    if (assertedPattern !== undefined) return this.interpolateRecovering(assertedPattern, value);
-    try { return this.interpolateRecovering(this.targetRow(value).translation, value, true); }
+    if (assertedPattern !== undefined) return this.interpolateParts(assertedPattern, value, false, annotations);
+    const row = this.targetRow(value);
+    return this.interpolateParts(row.translation, value, true, annotations);
+  }
+  private resolveValueParts<T = never>(
+    value: LocalizedString,
+    annotations?: Readonly<Record<string, T>>,
+  ): { parts: ResolvedLocalizedPart<T>[]; usedSourceFallback: boolean } {
+    const assertedPattern = assertedLocalizedPattern(value);
+    if (assertedPattern !== undefined) {
+      return { parts: this.interpolatePartsRecovering(assertedPattern, value, false, annotations), usedSourceFallback: false };
+    }
+    try {
+      return {
+        parts: this.interpolatePartsRecovering(this.targetRow(value).translation, value, true, annotations),
+        usedSourceFallback: false,
+      };
+    }
     catch (error) {
       this.emit(error, value.entryId);
-      try { return this.interpolateRecovering(selectPattern(this.#source, value).text, value); }
-      catch (sourceError) { this.emit(sourceError, value.entryId); return `⟦${value.entryId}⟧`; }
+      try {
+        return {
+          parts: this.interpolatePartsRecovering(selectPattern(this.#source, value).text, value, false, annotations),
+          usedSourceFallback: true,
+        };
+      }
+      catch (sourceError) {
+        this.emit(sourceError, value.entryId);
+        return { parts: [{ kind: "literal", value: `⟦${value.entryId}⟧` }], usedSourceFallback: true };
+      }
     }
   }
   private targetRow(value: LocalizedString): BundleRow {
@@ -335,20 +395,25 @@ export class Localizer {
     const digest = blake3(new TextEncoder().encode(canonicalJson(expansion)));
     throw new TroxResolveError("trox.missing-row", `row row1_${base32(digest.slice(0, 16))} is unavailable`);
   }
-  private interpolate(pattern: string, value: LocalizedString, preferTarget: boolean): string {
-    let output = "";
+  private interpolateParts<T>(
+    pattern: string,
+    value: LocalizedString,
+    preferTarget: boolean,
+    annotations: Readonly<Record<string, T>> | undefined,
+  ): ResolvedLocalizedPart<T>[] {
+    const output: ResolvedLocalizedPart<T>[] = [];
     for (let index = 0; index < pattern.length;) {
-      if (pattern.startsWith("{{", index)) { output += "{"; index += 2; continue; }
-      if (pattern.startsWith("}}", index)) { output += "}"; index += 2; continue; }
+      if (pattern.startsWith("{{", index)) { appendLiteral(output, "{"); index += 2; continue; }
+      if (pattern.startsWith("}}", index)) { appendLiteral(output, "}"); index += 2; continue; }
       if (pattern[index] === "{") {
         const end = pattern.indexOf("}", index + 1); if (end < 0) throw new TroxResolveError("trox.malformed-translation", "unclosed placeholder");
         const name = pattern.slice(index + 1, end); const argument = value.arguments[name];
         if (argument === undefined) throw new TroxResolveError("trox.missing-argument", `argument ${name} is missing`);
         const surface = this.argumentSurface(argument, preferTarget);
-        output += this.#target.wire.isolation === "isolate" ? `\u2068${surface}\u2069` : surface; index = end + 1; continue;
+        appendPlaceholder(output, name, this.isolate(surface), annotations); index = end + 1; continue;
       }
       if (pattern[index] === "}") throw new TroxResolveError("trox.malformed-translation", "unmatched closing brace");
-      output += pattern[index]; index += 1;
+      appendLiteral(output, pattern[index]!); index += 1;
     }
     return output;
   }
@@ -364,11 +429,16 @@ export class Localizer {
       case "term": return this.termSurface(argument, preferTarget);
     }
   }
-  private interpolateRecovering(pattern: string, value: LocalizedString, preferTarget = false): string {
-    let output = "";
+  private interpolatePartsRecovering<T>(
+    pattern: string,
+    value: LocalizedString,
+    preferTarget: boolean,
+    annotations: Readonly<Record<string, T>> | undefined,
+  ): ResolvedLocalizedPart<T>[] {
+    const output: ResolvedLocalizedPart<T>[] = [];
     for (let index = 0; index < pattern.length;) {
-      if (pattern.startsWith("{{", index)) { output += "{"; index += 2; continue; }
-      if (pattern.startsWith("}}", index)) { output += "}"; index += 2; continue; }
+      if (pattern.startsWith("{{", index)) { appendLiteral(output, "{"); index += 2; continue; }
+      if (pattern.startsWith("}}", index)) { appendLiteral(output, "}"); index += 2; continue; }
       if (pattern[index] === "{") {
         const end = pattern.indexOf("}", index + 1); if (end < 0) throw new TroxResolveError("trox.malformed-translation", "unclosed placeholder");
         const name = pattern.slice(index + 1, end); const argument = value.arguments[name]; let surface: string;
@@ -382,12 +452,15 @@ export class Localizer {
           }
         } else if (argument.kind === "opaque") surface = this.resolve(LocalizedString.fromValidatedWire(argument.value, CONSTRUCTION_TOKEN));
         else { try { surface = this.argumentSurface(argument, preferTarget); } catch { surface = `{${name}}`; } }
-        output += this.#target.wire.isolation === "isolate" ? `\u2068${surface}\u2069` : surface; index = end + 1; continue;
+        appendPlaceholder(output, name, this.isolate(surface), annotations); index = end + 1; continue;
       }
       if (pattern[index] === "}") throw new TroxResolveError("trox.malformed-translation", "unmatched closing brace");
-      output += pattern[index]; index += 1;
+      appendLiteral(output, pattern[index]!); index += 1;
     }
     return output;
+  }
+  private isolate(surface: string): string {
+    return this.#target.wire.isolation === "isolate" ? `\u2068${surface}\u2069` : surface;
   }
   private termSurface(argument: TermArgument, preferTarget: boolean): string {
     const bundle = preferTarget ? this.#target : this.#source; const termValue = ownValue(bundle.wire.terms, argument.term_id);
@@ -414,6 +487,30 @@ export class Localizer {
       // Diagnostics are observational and must never change resolution behavior.
     }
   }
+}
+
+function appendLiteral<T>(parts: ResolvedLocalizedPart<T>[], value: string): void {
+  const previous = parts.at(-1);
+  if (previous?.kind === "literal") {
+    parts[parts.length - 1] = { kind: "literal", value: previous.value + value };
+  } else {
+    parts.push({ kind: "literal", value });
+  }
+}
+
+function appendPlaceholder<T>(
+  parts: ResolvedLocalizedPart<T>[],
+  name: string,
+  value: string,
+  annotations: Readonly<Record<string, T>> | undefined,
+): void {
+  parts.push(annotations !== undefined && Object.hasOwn(annotations, name)
+    ? { kind: "placeholder", name, value, annotation: annotations[name]! }
+    : { kind: "placeholder", name, value });
+}
+
+function joinParts(parts: readonly ResolvedLocalizedPart<unknown>[]): string {
+  return parts.map((part) => part.value).join("");
 }
 
 function validateBundle(bundle: Bundle): void {

@@ -288,10 +288,54 @@ export class LocalizedString {
   get arguments(): Readonly<Record<string, Argument>> { return this.#wire.arguments; }
   get selectors(): readonly SelectorRecord[] { return this.#wire.selectors; }
   isAtomic(): boolean { return this.#wire.identity.pattern.kind === "text" && Object.keys(this.#wire.arguments).length === 0 && this.#wire.selectors.length === 0; }
+  /** Associates application metadata with declared placeholders without resolving this value. */
+  annotate<T>(annotations: Readonly<Record<string, T>>): AnnotatedLocalizedString<T> {
+    if (annotations === null || typeof annotations !== "object" || Array.isArray(annotations)) {
+      throw new TroxValueError("trox.invalid-annotations", "placeholder annotations must be an object");
+    }
+    return new AnnotatedLocalizedString(this, annotations);
+  }
   toCanonicalJSON(): string { return canonicalJson(this.#wire); }
   wireValue(): LocalizedStringWire { return structuredClone(this.#wire); }
   toString(): never { throw new TroxValueError("trox.explicit-resolution", "LocalizedString must be resolved by a Localizer"); }
   [Symbol.toPrimitive](): never { throw new TroxValueError("trox.explicit-resolution", "LocalizedString must be resolved by a Localizer"); }
+}
+
+/** A lazy localized value paired with application-owned placeholder metadata. */
+export class AnnotatedLocalizedString<T> {
+  readonly localized: LocalizedString;
+  readonly annotations: Readonly<Record<string, T>>;
+
+  /** @internal Construct through LocalizedString.annotate so placeholder names are validated. */
+  constructor(localized: LocalizedString, annotations: Readonly<Record<string, T>>) {
+    const snapshot: Record<string, T> = {};
+    for (const [name, annotation] of Object.entries(annotations)) {
+      if (!Object.hasOwn(localized.arguments, name)) {
+        throw new TroxValueError(
+          "trox.unknown-annotation",
+          `annotation \`${name}\` does not name a declared placeholder`,
+        );
+      }
+      snapshot[name] = annotation;
+    }
+    this.localized = localized;
+    this.annotations = Object.freeze(snapshot);
+    Object.freeze(this);
+  }
+
+  /** Returns the metadata for one placeholder without resolving the message. */
+  annotationFor(name: string): T | undefined { return this.annotations[name]; }
+
+  /** Returns whether metadata was supplied, including when its value is undefined. */
+  hasAnnotation(name: string): boolean { return Object.hasOwn(this.annotations, name); }
+
+  /** Annotation metadata is deliberately outside Trox's canonical wire protocol. */
+  toJSON(): never {
+    throw new TroxValueError(
+      "trox.annotation-serialization",
+      "annotated localized values are not serializable; serialize the LocalizedString and application metadata separately",
+    );
+  }
 }
 
 /** @internal */
