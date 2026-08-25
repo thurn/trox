@@ -35,7 +35,7 @@ describe("authoring", () => {
       otherwise(plural(count, [one("That player has {count} card."), other("That player has {count} cards.")])),
     ]), { count }, "Battle status showing cards owned by one participant.");
     expect(value.selectors.map((record) => record.path)).toEqual([[], [0], [1], [2]]);
-    const fixture = readFileSync(new URL("../../../conformance/localized-nested-owner-count.json", import.meta.url), "utf8").trimEnd();
+    const fixture = readFileSync(new URL("../../../crates/trox/tests/fixtures/conformance/localized-nested-owner-count.json", import.meta.url), "utf8").trimEnd();
     expect(value.toCanonicalJSON()).toBe(fixture);
     const source = testBundle("en-US", { [value.entryId]: { arguments: { count: { kind: "scalar" } }, identity: value.identity, rows: {}, source_signature: value.sourceSignature } });
     const corrupted = JSON.parse(fixture) as { selectors: unknown[] }; corrupted.selectors.reverse();
@@ -48,7 +48,7 @@ describe("authoring", () => {
       exact(0, "No cards remain."),
       one("{card_count} card remains."), other("{card_count} cards remain."),
     ]), { card_count }, "Status.");
-    const fixture = readFileSync(new URL("../../../conformance/localized-card-count.json", import.meta.url), "utf8").trimEnd();
+    const fixture = readFileSync(new URL("../../../crates/trox/tests/fixtures/conformance/localized-card-count.json", import.meta.url), "utf8").trimEnd();
     expect(value.toCanonicalJSON()).toBe(fixture);
   });
 
@@ -133,7 +133,7 @@ describe("authoring", () => {
       version: { major: 1, minor: 0 },
     });
 
-    const sharedReference = readFileSync(new URL("../../../conformance/source-message-scalar.json", import.meta.url), "utf8").trimEnd();
+    const sharedReference = readFileSync(new URL("../../../crates/trox/tests/fixtures/conformance/source-message-scalar.json", import.meta.url), "utf8").trimEnd();
     const sharedTemplate = txa("Hello {name}", { name: "sample" }, "Greeting.");
     expect(canonicalJson(reference(sharedTemplate))).toBe(sharedReference);
 

@@ -6,7 +6,7 @@ use tempfile::tempdir;
 #[test]
 fn quest_scenarios_expand_across_four_grammatically_distinct_locales() {
     let target = tempdir().unwrap();
-    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stress/quest");
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/quest");
     copy_dir(&source, target.path());
     let config = target.path().join("trox.ron");
     Command::cargo_bin("trox")

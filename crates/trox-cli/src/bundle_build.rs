@@ -612,7 +612,6 @@ mod tests {
                 },
             )]),
             terms: BTreeMap::new(),
-            source_locale_data: locale_data("en-US"),
             bytes_scanned: 0,
             files_scanned: 0,
         };
@@ -759,7 +758,6 @@ mod tests {
                     forms: BTreeMap::new(),
                 },
             )]),
-            source_locale_data: locale_data("en-US"),
             bytes_scanned: 0,
             files_scanned: 0,
         };

@@ -1,0 +1,56 @@
+name: Publish crates
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact workspace version to publish
+        required: true
+        type: string
+      confirm:
+        description: Type "publish" to confirm this permanent operation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: inputs.confirm == 'publish'
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Verify requested version
+        shell: bash
+        run: |
+          manifest_version="$(cargo metadata --no-deps --format-version 1 | jq -r '[.packages[].version] | unique | if length == 1 then .[0] else error("workspace package versions differ") end')"
+          test "${manifest_version}" = "${{ inputs.version }}"
+          test "$(node -p 'require("./packages/trox/package.json").version')" = "${manifest_version}"
+      - run: cargo test --workspace --all-targets
+      - run: cargo package --workspace
+      - name: Publish runtime crate
+        run: cargo publish -p trox --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Wait for registry indexing
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            if cargo info "trox@${{ inputs.version }}" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "trox ${{ inputs.version }} was not indexed within five minutes" >&2
+          exit 1
+      - name: Publish CLI crate
+        run: cargo publish -p trox-cli --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

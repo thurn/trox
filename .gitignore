@@ -2,6 +2,6 @@
 node_modules/
 /packages/trox/dist/
 /benchmarks/generated/
-/stress/quest/generated/
+/crates/trox-cli/tests/fixtures/quest/generated/
 .DS_Store
 *.tmp

@@ -47,7 +47,6 @@ pub struct CsvRow {
     pub english: String,
     pub description: String,
     pub translation: String,
-    pub conditions: String,
     pub status: String,
     pub translator_note: String,
     pub placeholders: String,
@@ -87,7 +86,6 @@ impl CsvRow {
             english: get(0),
             description,
             translation: get(2),
-            conditions,
             status: get(3 + offset),
             translator_note: get(4 + offset),
             placeholders: get(5 + offset),
@@ -351,7 +349,6 @@ fn synchronize_impl(
     for expected in expected {
         let prior = active_old.get(&expected.row_id).copied();
         let mut row = CsvRow {
-            conditions: expected.conditions.clone(),
             english: expected.english.clone(),
             description: expected.description.clone(),
             placeholders: expected.placeholders.clone(),

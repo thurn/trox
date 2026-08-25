@@ -235,11 +235,11 @@ describe("robust argument construction", () => {
 describe("source catalog authorization", () => {
   it("accepts the shared counted-term catalog contract", () => {
     const sourceJson = readFileSync(
-      new URL("../../../conformance/source-term-contract.json", import.meta.url),
+      new URL("../../../crates/trox/tests/fixtures/conformance/source-term-contract.json", import.meta.url),
       "utf8",
     ).trimEnd();
     const wireJson = readFileSync(
-      new URL("../../../conformance/localized-counted-term.json", import.meta.url),
+      new URL("../../../crates/trox/tests/fixtures/conformance/localized-counted-term.json", import.meta.url),
       "utf8",
     ).trimEnd();
     const source = bundleFromCanonicalJSON(sourceJson);
@@ -255,11 +255,11 @@ describe("source catalog authorization", () => {
     ["different number policy", { kind: "term", form: "counted", term_id: "unit.card" }],
   ])("rejects a %s substitution with a stale v1.1 contract", (_label, replacement) => {
     const sourceJson = readFileSync(
-      new URL("../../../conformance/source-term-contract.json", import.meta.url),
+      new URL("../../../crates/trox/tests/fixtures/conformance/source-term-contract.json", import.meta.url),
       "utf8",
     ).trimEnd();
     const wireJson = readFileSync(
-      new URL("../../../conformance/localized-counted-term.json", import.meta.url),
+      new URL("../../../crates/trox/tests/fixtures/conformance/localized-counted-term.json", import.meta.url),
       "utf8",
     ).trimEnd();
     const source = bundleFromCanonicalJSON(sourceJson);

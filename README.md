@@ -32,6 +32,57 @@ let text = localizer.resolve(&value);
 assert_eq!(text, "3 cards remain.");
 ```
 
+## Install and start
+
+Trox requires Rust 1.89 or newer. Add the runtime library to an application and
+install the source-extraction CLI separately:
+
+```sh
+cargo add trox
+cargo install trox-cli
+```
+
+The `trox-cli` package installs a binary named `trox`. Its Rust modules are
+implementation details of the executable and are not a supported library API.
+
+Create a `trox.ron` at the project root:
+
+```ron
+(
+    source_locale: "en-US",
+    terms: "terms.ron",
+    source_bundle: "generated/en-US.trox.json",
+    source_report: "generated/en-US.csv",
+    sources: [(language: Rust, include: ["src/**/*.rs"])],
+    locales: {},
+    term_forms: {},
+)
+```
+
+Create an empty `terms.ron` containing `{}`, author messages with the Rust API
+below, and validate the project:
+
+```sh
+trox check --deny warnings
+trox extract
+trox bundle
+```
+
+Add a locale's profile, CSV, and bundle paths to `trox.ron`, then create its
+initial files with `trox locale init LOCALE`. The full configuration contract
+is documented under [Project configuration](#project-configuration).
+
+## Support policy
+
+- `trox` and `trox-cli` support Rust 1.89 and newer.
+- The Rust runtime is tested on Linux, macOS, and Windows.
+- The `trox` command is tested on Linux, macOS, and Windows. On non-Unix
+  platforms its optional benchmark reports no peak-memory measurement.
+- The `trox` library follows Cargo semantic versioning. The `trox-cli` package
+  exposes only the `trox` executable; its internal Rust modules are not API.
+- Bundle and serialized-value compatibility is versioned explicitly by their
+  embedded format versions and validated when data is loaded.
+
 ## Capabilities and boundaries
 
 Trox provides:
@@ -74,11 +125,12 @@ Design rules:
 .
 ├── crates/
 │   ├── trox/          Rust API, bundles, wire values, resolver
-│   └── trox-cli/      scanners, CSV workflow, bundle builder
+│   └── trox-cli/      `trox` binary, scanners, CSV workflow, bundle builder
 ├── packages/
 │   └── trox/          `@trox/runtime` TypeScript package
-├── conformance/       canonical cross-language fixtures
-├── stress/
+├── crates/trox/tests/fixtures/
+│   └── conformance/   canonical cross-language fixtures
+├── crates/trox-cli/tests/fixtures/
 │   └── quest/         multilingual scenario corpus
 ├── Cargo.toml         Rust workspace
 ├── package.json       npm workspace
@@ -99,13 +151,13 @@ Run the Quest workflow:
 
 ```sh
 cargo run --release -p trox-cli --bin trox -- \
-  --config stress/quest/trox.ron extract
+  --config crates/trox-cli/tests/fixtures/quest/trox.ron extract
 
 cargo run --release -p trox-cli --bin trox -- \
-  --config stress/quest/trox.ron check
+  --config crates/trox-cli/tests/fixtures/quest/trox.ron check
 
 cargo run --release -p trox-cli --bin trox -- \
-  --config stress/quest/trox.ron bundle --allow-missing
+  --config crates/trox-cli/tests/fixtures/quest/trox.ron bundle --allow-missing
 ```
 
 Typical application workflow:
@@ -1257,9 +1309,9 @@ cargo test --workspace
 npm run typecheck
 npm test
 
-trox --config stress/quest/trox.ron extract
-trox --config stress/quest/trox.ron check
-trox --config stress/quest/trox.ron bundle --allow-missing
+trox --config crates/trox-cli/tests/fixtures/quest/trox.ron extract
+trox --config crates/trox-cli/tests/fixtures/quest/trox.ron check
+trox --config crates/trox-cli/tests/fixtures/quest/trox.ron bundle --allow-missing
 ```
 
 Confirm that a second extraction is byte-identical. The benchmark uses 100 MiB

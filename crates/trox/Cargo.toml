@@ -3,9 +3,14 @@ name = "trox"
 description = "Immutable source-authored localization values and deterministic bundle runtime"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 documentation = "https://docs.rs/trox"
 readme = "../../README.md"
+keywords = ["localization", "i18n", "internationalization", "translation"]
+categories = ["internationalization", "development-tools"]
+publish = ["crates-io"]
 
 [dependencies]
 blake3.workspace = true

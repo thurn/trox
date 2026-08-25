@@ -90,7 +90,7 @@ fn scalar_source_reference_matches_the_typescript_conformance_fixture() {
         ron::from_str(r#"Tx(text:"Hello {name}",placeholders:{"name":Scalar})"#).unwrap();
     let fixture = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../conformance/source-message-scalar.json"
+        "/tests/fixtures/conformance/source-message-scalar.json"
     ))
     .unwrap();
     assert_eq!(

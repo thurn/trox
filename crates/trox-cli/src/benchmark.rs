@@ -222,6 +222,7 @@ fn generate_file(path: &Path, language: Language, target_bytes: usize, calls: us
     Ok(())
 }
 
+#[cfg(unix)]
 fn peak_rss_bytes() -> u64 {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
     // SAFETY: getrusage initializes the provided rusage structure on success.
@@ -236,6 +237,11 @@ fn peak_rss_bytes() -> u64 {
     } else {
         rss * 1024
     }
+}
+
+#[cfg(not(unix))]
+fn peak_rss_bytes() -> u64 {
+    0
 }
 
 #[cfg(test)]

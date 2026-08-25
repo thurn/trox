@@ -1,22 +1,34 @@
+mod benchmark;
+mod bundle_build;
+mod cldr;
+mod config;
+mod csv_workflow;
+mod diagnostic;
+mod extract;
+mod handoff;
+mod locale_plan;
+mod scanner;
+mod transaction;
+
 use std::collections::BTreeMap;
 use std::env;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
-use trox_cli::bundle_build::{
+use crate::bundle_build::{
     LocaleArtifacts, build_source_bundle, build_target_bundle, source_fingerprint,
 };
-use trox_cli::config::{LintLevel, ProjectConfig};
-use trox_cli::csv_workflow::{apply_translator_edits, prune, synchronize};
-use trox_cli::diagnostic::{Diagnostic, DiagnosticResultExt, Diagnostics, classified_diagnostic};
-use trox_cli::extract::{
+use crate::config::{LintLevel, ProjectConfig};
+use crate::csv_workflow::{apply_translator_edits, prune, synchronize};
+use crate::diagnostic::{Diagnostic, DiagnosticResultExt, Diagnostics, classified_diagnostic};
+use crate::extract::{
     LocaleProfile, ProfileDirection, ProfileIsolation, build_catalog, expand_rows,
 };
-use trox_cli::handoff::{export_workbook, import_workbook, write_workbook};
-use trox_cli::locale_plan::LocalePlan;
-use trox_cli::transaction::{atomic_replace_all, recover_pending_transaction};
+use crate::handoff::{export_workbook, import_workbook, write_workbook};
+use crate::locale_plan::LocalePlan;
+use crate::transaction::{atomic_replace_all, recover_pending_transaction};
+use anyhow::{Context, Result, bail};
+use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -196,7 +208,7 @@ fn run(cli: &Cli) -> Result<()> {
             baseline_mib_s,
         } => (
             "trox.benchmark",
-            trox_cli::benchmark::run(&config, *iterations, *synthetic_mib, *baseline_mib_s),
+            crate::benchmark::run(&config, *iterations, *synthetic_mib, *baseline_mib_s),
         ),
     };
     result.diagnostic(
@@ -338,8 +350,8 @@ fn command_extract(
 
 struct OwnedArtifacts {
     profile: LocaleProfile,
-    rows: Vec<trox_cli::extract::ExpectedRow>,
-    csv: trox_cli::csv_workflow::CsvDocument,
+    rows: Vec<crate::extract::ExpectedRow>,
+    csv: crate::csv_workflow::CsvDocument,
 }
 
 fn command_bundle(
@@ -566,7 +578,7 @@ fn require_xlsx_path(path: &std::path::Path) -> Result<()> {
 }
 
 fn command_locale_init(config: &ProjectConfig, locale: &str, json: bool) -> Result<()> {
-    trox_cli::cldr::ensure_supported_locale(locale)?;
+    crate::cldr::ensure_supported_locale(locale)?;
     let output = config
         .locales
         .get(locale)
@@ -579,7 +591,7 @@ fn command_locale_init(config: &ProjectConfig, locale: &str, json: bool) -> Resu
     if csv_path.exists() {
         bail!("locale CSV {} already exists", csv_path.display());
     }
-    let data = trox_cli::cldr::locale_data(locale);
+    let data = crate::cldr::locale_data(locale);
     let direction = if data.direction == trox::TextDirection::Rtl {
         "Rtl"
     } else {

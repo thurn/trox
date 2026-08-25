@@ -83,7 +83,6 @@ fn message_rows_follow_the_earliest_source_location() {
     let model = CatalogModel {
         messages,
         terms: BTreeMap::new(),
-        source_locale_data: locale_data("en-US"),
         bytes_scanned: 0,
         files_scanned: 2,
     };
@@ -170,7 +169,6 @@ fn select_conditions_display_only_the_labels_for_the_selected_branch() {
     let model = CatalogModel {
         messages: BTreeMap::from([("tx1_test".into(), entry)]),
         terms: BTreeMap::new(),
-        source_locale_data: locale_data("en-US"),
         bytes_scanned: 0,
         files_scanned: 0,
     };
@@ -223,7 +221,6 @@ fn message_meaning_is_included_in_the_translator_description() {
     let model = CatalogModel {
         messages: BTreeMap::from([("tx1_test".into(), entry)]),
         terms: BTreeMap::new(),
-        source_locale_data: locale_data("en-US"),
         bytes_scanned: 0,
         files_scanned: 0,
     };
@@ -271,7 +268,6 @@ fn ron_paths_are_included_in_the_translator_description() {
     let model = CatalogModel {
         messages: BTreeMap::from([("tx1_test".into(), entry)]),
         terms: BTreeMap::new(),
-        source_locale_data: locale_data("en-US"),
         bytes_scanned: 0,
         files_scanned: 0,
     };
@@ -303,7 +299,6 @@ fn numbered_default_fallback_is_compatible_and_expands_per_category() {
     let model = CatalogModel {
         messages: BTreeMap::new(),
         terms: BTreeMap::from([("card".into(), term)]),
-        source_locale_data: locale_data("en-US"),
         bytes_scanned: 0,
         files_scanned: 0,
     };
@@ -370,7 +365,6 @@ fn numbered_default_fallback_keeps_message_facets_reachable() {
     let model = CatalogModel {
         messages: BTreeMap::new(),
         terms: BTreeMap::from([("card".into(), fallback_term())]),
-        source_locale_data: locale_data("en-US"),
         bytes_scanned: 0,
         files_scanned: 0,
     };
@@ -528,7 +522,6 @@ fn facet_expansion_stops_at_the_configured_cap() {
             ("card".into(), fallback_term()),
             ("deck".into(), fallback_term()),
         ]),
-        source_locale_data: locale_data("en-US"),
         bytes_scanned: 0,
         files_scanned: 0,
     };
@@ -611,7 +604,6 @@ fn selector_expansion_stops_before_materializing_over_cap_leaves() {
     let model = CatalogModel {
         messages: BTreeMap::from([(entry.entry_id.clone(), entry)]),
         terms: BTreeMap::new(),
-        source_locale_data: locale_data("en-US"),
         bytes_scanned: 0,
         files_scanned: 0,
     };
@@ -630,7 +622,6 @@ fn term_entries_obey_the_configured_row_cap() {
     let model = CatalogModel {
         messages: BTreeMap::new(),
         terms: BTreeMap::from([("card".into(), fallback_term())]),
-        source_locale_data: locale_data("en-US"),
         bytes_scanned: 0,
         files_scanned: 0,
     };
@@ -653,7 +644,6 @@ fn locale_profiles_reject_unknown_catalog_and_facet_keys() {
     let model = CatalogModel {
         messages: BTreeMap::new(),
         terms: BTreeMap::from([("card".into(), fallback_term())]),
-        source_locale_data: locale_data("en-US"),
         bytes_scanned: 0,
         files_scanned: 0,
     };
@@ -737,7 +727,6 @@ fn revision_context_tracks_only_relevant_forms_and_locale_term_metadata() {
     let model = CatalogModel {
         messages: BTreeMap::new(),
         terms: BTreeMap::from([("card".into(), fallback_term())]),
-        source_locale_data: locale_data("en-US"),
         bytes_scanned: 0,
         files_scanned: 0,
     };

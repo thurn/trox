@@ -165,24 +165,16 @@ impl Diagnostics {
             .iter()
             .any(|item| item.severity == Severity::Error)
     }
-    pub fn has_warnings(&self) -> bool {
-        self.items
-            .iter()
-            .any(|item| item.severity == Severity::Warning)
-    }
     pub fn iter(&self) -> impl Iterator<Item = &Diagnostic> {
         self.items.iter()
     }
+    #[cfg(test)]
     pub fn into_vec(self) -> Vec<Diagnostic> {
         self.items
     }
     pub fn len(&self) -> usize {
         self.items.len()
     }
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-
     pub fn apply_warning_policy(
         &mut self,
         mut level: impl FnMut(&str) -> crate::config::LintLevel,

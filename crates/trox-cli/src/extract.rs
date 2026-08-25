@@ -187,13 +187,13 @@ pub struct MessageEntry {
 pub struct CatalogModel {
     pub messages: BTreeMap<String, MessageEntry>,
     pub terms: TermCatalog,
-    pub source_locale_data: LocaleData,
     pub bytes_scanned: u64,
     pub files_scanned: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct ExpectedRow {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub conditions: String,
     pub english: String,
     pub description: String,
@@ -482,7 +482,6 @@ fn build_catalog_impl(
     Ok(CatalogModel {
         messages,
         terms,
-        source_locale_data,
         bytes_scanned,
         files_scanned: files.len(),
     })

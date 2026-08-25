@@ -54,7 +54,7 @@ fn dynamic_identity_matches_the_typescript_conformance_value() {
     assert_eq!(value.entry_id(), "tx1_s344kgctdm34ctyozrpgp4ksly");
     let fixture = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../conformance/localized-card-count.json"
+        "/tests/fixtures/conformance/localized-card-count.json"
     ))
     .unwrap();
     assert_eq!(format!("{}\n", value.to_canonical_json().unwrap()), fixture);
@@ -64,12 +64,12 @@ fn dynamic_identity_matches_the_typescript_conformance_value() {
 fn counted_term_wire_matches_the_shared_catalog_contract() {
     let source = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../conformance/source-term-contract.json"
+        "/tests/fixtures/conformance/source-term-contract.json"
     ))
     .unwrap();
     let wire = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../conformance/localized-counted-term.json"
+        "/tests/fixtures/conformance/localized-counted-term.json"
     ))
     .unwrap();
     let source = trox::Bundle::from_canonical_json(source.trim_end()).unwrap();
@@ -184,7 +184,7 @@ fn nested_patterns_have_canonical_selector_paths() {
     assert_eq!(paths, vec![&[][..], &[0][..], &[1][..], &[2][..]]);
     let fixture = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../conformance/localized-nested-owner-count.json"
+        "/tests/fixtures/conformance/localized-nested-owner-count.json"
     ))
     .unwrap();
     assert_eq!(format!("{}\n", value.to_canonical_json().unwrap()), fixture);

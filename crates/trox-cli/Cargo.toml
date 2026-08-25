@@ -3,13 +3,18 @@ name = "trox-cli"
 description = "Fast source extractor and localization workflow CLI for Trox"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
-documentation = "https://docs.rs/trox-cli"
+repository.workspace = true
 readme = "../../README.md"
+keywords = ["localization", "i18n", "translation", "cli"]
+categories = ["command-line-utilities", "internationalization", "development-tools"]
+publish = ["crates-io"]
 
 [[bin]]
 name = "trox"
 path = "src/main.rs"
+doc = false
 
 [dependencies]
 anyhow.workspace = true
