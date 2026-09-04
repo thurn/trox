@@ -251,9 +251,100 @@ fn source_isolation_can_be_disabled_explicitly() {
 
 #[test]
 fn clean_fixture_application_builds_and_runs_without_generated_files_or_the_cli() {
-    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/source-development-app");
-    let generated = std::fs::read_dir(&fixture)
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let repository_fixture = manifest_dir.join("tests/fixtures/source-development-app");
+    let temporary_fixture = (!repository_fixture.is_dir()).then(|| {
+        let fixture = tempfile::tempdir().unwrap();
+        std::fs::create_dir(fixture.path().join("src")).unwrap();
+        let dependency_path = manifest_dir
+            .to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        std::fs::write(
+            fixture.path().join("Cargo.toml"),
+            format!(
+                r#"[package]
+name = "trox-source-development-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+trox = {{ path = "{dependency_path}" }}
+"#,
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            fixture.path().join("src/main.rs"),
+            r#"use trox::prelude::*;
+
+fn main() {
+    let localizer = Localizer::for_source(
+        SourceLocale::from_project_ron(
+            include_str!("../trox.ron"),
+            include_str!("../terms.ron"),
+        )
+        .expect("valid source localization configuration"),
+    )
+    .expect("valid source localizer");
+    let count = 2_u32;
+    let message = txa(
+        plural(
+            count,
+            [one("Draw {count} {noun}."), other("Draw {count} {noun}.")],
+        ),
+        tx_args![
+            count,
+            noun => counted(TermId::new("unit.card"), count),
+        ],
+        "Instruction using a counted source term.",
+    );
+    println!("{}", localizer.resolve_checked(&message).unwrap());
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            fixture.path().join("terms.ron"),
+            r#"{
+    "unit.card": (
+        value: "card",
+        forms: {
+            "counted": Number([One("card"), Other("cards")]),
+        },
+    ),
+}
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            fixture.path().join("trox.ron"),
+            r#"(
+    source_locale: "en-US",
+    terms: "terms.ron",
+    source_bundle: ".trox-output/en-US.trox.json",
+    source_report: ".trox-output/en-US.csv",
+    sources: [(language: Rust, include: ["src/**/*.rs"])],
+    locales: {},
+    term_forms: {
+        "counted": (
+            description: "Term inflected for an explicit count.",
+            number: Required,
+        ),
+    },
+)
+"#,
+        )
+        .unwrap();
+        fixture
+    });
+    let fixture = temporary_fixture
+        .as_ref()
+        .map_or(repository_fixture.as_path(), |fixture| fixture.path());
+    let generated = std::fs::read_dir(fixture)
         .unwrap()
         .filter_map(Result::ok)
         .map(|entry| entry.path())
@@ -268,6 +359,19 @@ fn clean_fixture_application_builds_and_runs_without_generated_files_or_the_cli(
 
     let target = tempfile::tempdir().unwrap();
     let manifest = fixture.join("Cargo.toml");
+    if temporary_fixture.is_some() {
+        let output = std::process::Command::new(env!("CARGO"))
+            .args(["generate-lockfile", "--quiet", "--manifest-path"])
+            .arg(&manifest)
+            .env("CARGO_TARGET_DIR", target.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "fixture cargo generate-lockfile failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     let run = |subcommand: &str| {
         let output = std::process::Command::new(env!("CARGO"))
             .args([subcommand, "--quiet", "--locked", "--manifest-path"])

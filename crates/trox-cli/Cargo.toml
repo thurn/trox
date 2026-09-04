@@ -34,7 +34,7 @@ serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
-trox = { version = "=0.2.0", path = "../trox" }
+trox = { version = "=0.2.1", path = "../trox" }
 unicode-normalization.workspace = true
 walkdir.workspace = true
 
