@@ -1,0 +1,14 @@
+(
+    source_locale: "en-US",
+    terms: "terms.ron",
+    source_bundle: ".trox-output/en-US.trox.json",
+    source_report: ".trox-output/en-US.csv",
+    sources: [(language: Rust, include: ["src/**/*.rs"])],
+    locales: {},
+    term_forms: {
+        "counted": (
+            description: "Term inflected for an explicit count.",
+            number: Required,
+        ),
+    },
+)

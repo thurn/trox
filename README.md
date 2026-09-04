@@ -28,22 +28,19 @@ fn cards_remaining(card_count: u32) -> LocalizedString {
 }
 
 let value = cards_remaining(3);
+let localizer = Localizer::for_source(SourceLocale::new("en-US")?)?;
 let text = localizer.resolve(&value);
-assert_eq!(text, "3 cards remain.");
+assert_eq!(text, "\u{2068}3\u{2069} cards remain.");
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ## Install and start
 
-Trox requires Rust 1.89 or newer. Add the runtime library to an application and
-install the source-extraction CLI separately:
+Trox requires Rust 1.89 or newer. Add the runtime library to an application:
 
 ```sh
 cargo add trox
-cargo install trox-cli
 ```
-
-The `trox-cli` package installs a binary named `trox`. Its Rust modules are
-implementation details of the executable and are not a supported library API.
 
 Create a `trox.ron` at the project root:
 
@@ -51,26 +48,57 @@ Create a `trox.ron` at the project root:
 (
     source_locale: "en-US",
     terms: "terms.ron",
-    source_bundle: "generated/en-US.trox.json",
-    source_report: "generated/en-US.csv",
+    source_bundle: ".trox-output/en-US.trox.json",
+    source_report: ".trox-output/en-US.csv",
     sources: [(language: Rust, include: ["src/**/*.rs"])],
     locales: {},
     term_forms: {},
 )
 ```
 
-Create an empty `terms.ron` containing `{}`, author messages with the Rust API
-below, and validate the project:
+Create an empty `terms.ron` containing `{}` and ignore the disposable output
+directory:
 
-```sh
-trox check --deny warnings
-trox extract
-trox bundle
+```gitignore
+/.trox-output/
 ```
 
-Add a locale's profile, CSV, and bundle paths to `trox.ron`, then create its
-initial files with `trox locale init LOCALE`. The full configuration contract
-is documented under [Project configuration](#project-configuration).
+Construct the development localizer from those two human-authored files. Using
+`include_str!` is convenient, but applications may load the bytes however they
+choose:
+
+```rust
+use trox::prelude::*;
+
+fn source_localizer() -> Result<Localizer, Box<dyn std::error::Error>> {
+    let source = SourceLocale::from_project_ron(
+        include_str!("../trox.ron"),
+        include_str!("../terms.ron"),
+    )?;
+    Ok(Localizer::for_source(source)?)
+}
+```
+
+`cargo check`, `cargo test`, `cargo clippy`, and `cargo run` now need only the
+application source, `trox.ron`, and `terms.ron`. Changing a `tx` or `txa` call
+changes the rendered source text on the next build; there is no extraction or
+bundle-generation step in the Rust build.
+
+Install `trox-cli` separately only when extracting translator material or
+building release bundles:
+
+```sh
+cargo install trox-cli
+trox check --deny warnings
+trox extract
+trox release-check
+```
+
+The package installs a binary named `trox`. Its Rust modules are implementation
+details of the executable and are not a supported library API. Add a locale's
+profile, CSV, and bundle paths to `trox.ron`, then create its initial files with
+`trox locale init LOCALE`. The full configuration contract is documented under
+[Project configuration](#project-configuration).
 
 ## Support policy
 
@@ -165,14 +193,33 @@ Typical application workflow:
 1. Add `tx` or `txa` calls to Rust or TypeScript.
 2. Add flat `Tx(...)` records to configured RON data.
 3. Declare runtime grammatical terms only when needed.
-4. Configure inputs and outputs in `trox.ron`.
-5. Run `trox check`.
-6. Run `trox extract`.
-7. Translate the generated CSV cells.
-8. Run `trox check --deny warnings` in CI.
-9. Run `trox bundle`.
-10. Load a source bundle and a target bundle.
+4. Use `Localizer::for_source` for normal builds, tests, and local runs.
+5. Configure ignored localization outputs in `trox.ron`.
+6. Run `trox check` without requiring any generated output to exist.
+7. Run `trox extract` in localization automation and hand off its CSV/workbook.
+8. Translate the generated rows outside the application source checkout.
+9. Run `trox release-check` in localization or packaging automation.
+10. Load the generated source and target bundles in production.
 11. Resolve messages only at the presentation boundary.
+
+## Source-development localization
+
+`Localizer::for_source` deliberately does not look up message entries or rows.
+It selects directly from the live `LocalizedString` identity, then applies the
+source locale's pinned cardinal rules, ordinal rules, decimal formatting, text
+direction, isolation policy, and term surfaces. Checked and recovering
+resolution APIs are both available, but ordinary source messages never produce
+missing-message or missing-row diagnostics.
+
+`SourceLocale::new("en-US")` is sufficient when the application has no terms.
+`SourceLocale::from_project_ron` additionally reads the existing source locale,
+term-form declarations, source fallback policy, term values, numbered forms,
+and optional source term facets from human-authored RON. It does not scan Rust,
+TypeScript, or RON message sources and it does not read the filesystem.
+
+Source mode is for in-process values authored by the application. Canonical
+wire decoding still requires a generated `SourceCatalog` because accepting a
+self-consistent message hash is not an authorization boundary.
 
 ## Rust syntax
 
@@ -941,8 +988,8 @@ Minimal complete `trox.ron`:
 (
     source_locale: "en-US",
     terms: "terms.ron",
-    source_bundle: "dist/locales/en-US.trox.json",
-    source_report: "locales/en-US.csv",
+    source_bundle: ".trox-output/bundles/en-US.trox.json",
+    source_report: ".trox-output/reports/en-US.csv",
 
     sources: [
         (
@@ -965,8 +1012,8 @@ Minimal complete `trox.ron`:
     locales: {
         "es": (
             profile: "locales/es.ron",
-            csv: "locales/es.csv",
-            bundle: "dist/locales/es.trox.json",
+            csv: ".trox-output/reports/es.csv",
+            bundle: ".trox-output/bundles/es.trox.json",
         ),
     },
 
@@ -1062,6 +1109,10 @@ trox bundle
 trox bundle --locale es
 trox bundle --allow-missing
 
+# Extract, generate, and validate all production artifacts in one release job.
+trox release-check
+trox release-check --allow-missing
+
 # Remove reviewed obsolete rows.
 trox prune --locale es
 
@@ -1080,6 +1131,14 @@ Extraction is transactional:
 - Message rows follow source path, then numeric line and column. When the same
   message appears more than once, its earliest occurrence determines its
   position.
+
+`trox check` always validates source code, terms, locale profiles, expansion,
+and lint policy. When a configured CSV exists it validates that managed state
+too; a missing generated CSV or JSON bundle is not an error. `trox extract`
+creates catalogs from scratch, and `trox release-check` performs extraction
+followed by production bundle generation and validation. Keep its configured
+destinations in an ignored output directory and publish them from localization
+or packaging automation instead of committing them.
 
 Extraction preserves:
 
@@ -1200,7 +1259,7 @@ implementation failure, not an ordinary authoring error.
 
 ## Bundles and runtime
 
-Every bundle operation emits:
+Production bundle operations emit:
 
 - The configured source bundle.
 - Every selected target bundle.
@@ -1212,6 +1271,23 @@ source bundle ─┐
                ├─> Localizer ─> resolve(LocalizedString) ─> String
 target bundle ─┘
 ```
+
+Applications retain ownership of filesystem, asset, or network I/O:
+
+```rust
+let source_json = load_asset("locales/en-US.trox.json")?;
+let target_json = load_asset("locales/es.trox.json")?;
+let source = trox::Bundle::from_canonical_json(&source_json)?;
+let target = trox::Bundle::from_canonical_json(&target_json)?;
+let localizer = trox::Localizer::new_strict(target, source)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+# fn load_asset(_: &str) -> Result<String, std::io::Error> { unreachable!() }
+```
+
+`Localizer::new` retains entry-level compatible fallback during a catalog
+mismatch; `Localizer::new_strict` rejects the mismatch. Replace the explicit
+`Localizer` value to change the active runtime locale. Trox performs no implicit
+locale discovery and holds no global locale state.
 
 Bundles are canonical JSON containing:
 
@@ -1283,7 +1359,7 @@ and puts `otherwise` last.
 - Rust, TypeScript, TSX, and RON syntax.
 - Terms and named forms.
 - Locale profiles and term classifications.
-- Existing managed CSV state.
+- Existing managed CSV state when present; generated artifacts are optional.
 - Placeholders and selector branches.
 - Target row expansion.
 - Lint policy and reasons.

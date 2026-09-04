@@ -36,6 +36,8 @@ pub struct TermRecord {
     pub value: String,
     #[serde(default)]
     pub forms: BTreeMap<String, TermSurface>,
+    #[serde(default)]
+    pub facets: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -234,6 +236,14 @@ fn load_terms_impl(config: &ProjectConfig) -> Result<TermCatalog> {
     let catalog: TermCatalog = ron::from_str(&input)
         .with_context(|| format!("invalid term catalog {}", path.display()))?;
     validate_terms(config, &catalog)?;
+    let project = fs::read_to_string(&config.path)
+        .with_context(|| format!("failed to read project config {}", config.path.display()))?;
+    trox::SourceLocale::from_project_ron(&project, &input).map_err(|error| {
+        anyhow::anyhow!(
+            "source-development term configuration disagrees with the CLI contract: {}",
+            error.message
+        )
+    })?;
     Ok(catalog)
 }
 
@@ -247,6 +257,10 @@ fn validate_terms(config: &ProjectConfig, catalog: &TermCatalog) -> Result<()> {
         validate_text(&term.value, "term value")?;
         if let Some(description) = &term.description {
             validate_description_text(description, "term description")?;
+        }
+        for (facet_id, value) in &term.facets {
+            validate_stable_id(facet_id, "source term facet ID")?;
+            validate_stable_id(value, "source term facet value")?;
         }
         for (form_id, surface) in &term.forms {
             let declaration = config

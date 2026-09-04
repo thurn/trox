@@ -164,7 +164,7 @@ fn source_terms(
         terms.insert(
             term_id.clone(),
             BundleTerm {
-                facets: BTreeMap::new(),
+                facets: term.facets.clone(),
                 forms,
             },
         );
@@ -756,6 +756,7 @@ mod tests {
                     description: None,
                     value: "card".into(),
                     forms: BTreeMap::new(),
+                    facets: BTreeMap::new(),
                 },
             )]),
             bytes_scanned: 0,

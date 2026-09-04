@@ -191,11 +191,10 @@ impl<'a> Cursor<'a> {
             }
             match ch {
                 '(' | '[' | '{' => stack.push(ch),
-                ')' | ']' | '}' => {
-                    if stack.pop().is_none() {
-                        return self.error("trox.syntax", "unbalanced expression");
-                    }
+                ')' | ']' | '}' if stack.pop().is_none() => {
+                    return self.error("trox.syntax", "unbalanced expression");
                 }
+                ')' | ']' | '}' => {}
                 _ => {}
             }
             (self.index, regex_allowed) = punctuation_end_and_regex_allowed(

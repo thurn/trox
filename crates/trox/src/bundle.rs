@@ -16,6 +16,7 @@ use crate::model::{
     SelectorRecord, Version, placeholders,
 };
 use crate::runtime::{CompiledPluralRules, format_number};
+use crate::source_locale::SourceLocale;
 use crate::value::LocalizedString;
 use validation::{expansion_key_from_json, validate_message_expansion};
 
@@ -430,11 +431,12 @@ impl Deref for CompiledBundle {
     }
 }
 
-/// Resolves immutable localized values through an explicit target/source bundle pair.
+/// Resolves immutable localized values through source configuration or a bundle pair.
 pub struct Localizer {
     target: CompiledBundle,
     source: CompiledBundle,
     catalog: SourceCatalog,
+    source_development: bool,
     hook: Option<DiagnosticHook>,
     pending: Vec<Diagnostic>,
 }
@@ -445,11 +447,32 @@ impl fmt::Debug for Localizer {
             .debug_struct("Localizer")
             .field("target", &self.target.locale)
             .field("source", &self.source.locale)
+            .field("source_development", &self.source_development)
             .finish()
     }
 }
 
 impl Localizer {
+    /// Constructs a bundle-free localizer for ordinary source-language development.
+    ///
+    /// Message patterns and selectors are read directly from each
+    /// [`LocalizedString`]. The supplied configuration contributes only pinned
+    /// locale behavior, isolation, and human-authored term surfaces; no
+    /// extraction report or generated bundle is consulted.
+    pub fn for_source(source: SourceLocale) -> Result<Self, DeserializeError> {
+        let bundle = source.into_runtime_bundle();
+        bundle.validate()?;
+        let catalog = SourceCatalog::from_validated_bundle(&bundle)?;
+        Ok(Self {
+            target: CompiledBundle::new(bundle.clone())?,
+            source: CompiledBundle::new(bundle)?,
+            catalog,
+            source_development: true,
+            hook: None,
+            pending: vec![],
+        })
+    }
+
     /// Constructs a recovering localizer and permits entry-level compatibility on catalog mismatch.
     pub fn new(target: Bundle, source: Bundle) -> Result<Self, DeserializeError> {
         Self::new_inner(target, source, false)
@@ -481,6 +504,7 @@ impl Localizer {
             target: CompiledBundle::new(target)?,
             source: CompiledBundle::new(source)?,
             catalog,
+            source_development: false,
             hook: None,
             pending,
         };
@@ -501,10 +525,17 @@ impl Localizer {
         self
     }
     /// Returns the source authorization catalog used for wire decoding.
+    ///
+    /// A source-development localizer has no extracted message authorization
+    /// entries, so its catalog accepts only the reserved [`crate::ls`] wire
+    /// shape. Decode application message wires with a production source bundle.
     pub fn source_catalog(&self) -> &SourceCatalog {
         &self.catalog
     }
     /// Decodes a canonical localized value through this localizer's source catalog.
+    ///
+    /// Source-development mode intentionally cannot authorize ordinary message
+    /// wires because no extracted catalog exists.
     pub fn localized_string_from_json(
         &self,
         input: &str,
@@ -552,7 +583,7 @@ impl Localizer {
         Ok(())
     }
 
-    /// Resolves only through the target row and returns the first failure.
+    /// Resolves through the live source pattern or target row and returns the first failure.
     pub fn resolve_checked(&self, value: &LocalizedString) -> Result<String, ResolveError> {
         let no_annotation = |_: &str| Option::<&()>::None;
         self.resolve_parts_checked_with(value, &no_annotation)
@@ -640,6 +671,10 @@ impl Localizer {
         if let Some(pattern) = value.asserted_localized_pattern() {
             return self.interpolate_parts(pattern, value, false, annotation_for);
         }
+        if self.source_development {
+            let selection = select_pattern(&self.source, value)?;
+            return self.interpolate_parts(&selection.text, value, true, annotation_for);
+        }
         let row = self.target_row(value)?;
         self.interpolate_parts(&row.translation, value, true, annotation_for)
     }
@@ -656,6 +691,22 @@ impl Localizer {
             let parts = self
                 .interpolate_parts_recovering(pattern, value, false, annotation_for)
                 .unwrap_or_else(|_| unreachable!("asserted-localized patterns are validated"));
+            return ResolvedLocalizedPartsOutcome {
+                parts,
+                used_source_fallback: false,
+            };
+        }
+        if self.source_development {
+            let parts = select_pattern(&self.source, value)
+                .and_then(|selection| {
+                    self.interpolate_parts_recovering(&selection.text, value, false, annotation_for)
+                })
+                .unwrap_or_else(|error| {
+                    self.emit(resolve_diagnostic(value.entry_id(), &error));
+                    vec![ResolvedLocalizedPart::Literal {
+                        value: format!("⟦{}⟧", value.entry_id()),
+                    }]
+                });
             return ResolvedLocalizedPartsOutcome {
                 parts,
                 used_source_fallback: false,

@@ -27,6 +27,91 @@ fn copy_dir(source: &std::path::Path, target: &std::path::Path) {
 }
 
 #[test]
+fn check_and_release_workflows_start_without_generated_artifacts() {
+    let fixture = copy_fixture();
+    let config = fixture.path().join("trox.ron");
+    assert!(!fixture.path().join("locales/en-US.csv").exists());
+    assert!(!fixture.path().join("locales/es.csv").exists());
+    assert!(!fixture.path().join("out/en-US.trox.json").exists());
+
+    Command::cargo_bin("trox")
+        .unwrap()
+        .args(["--config", config.to_str().unwrap(), "check"])
+        .assert()
+        .success();
+    assert!(!fixture.path().join("locales/en-US.csv").exists());
+    assert!(!fixture.path().join("out/en-US.trox.json").exists());
+
+    Command::cargo_bin("trox")
+        .unwrap()
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "release-check",
+            "--allow-missing",
+        ])
+        .assert()
+        .success();
+    for path in [
+        "locales/en-US.csv",
+        "locales/es.csv",
+        "out/en-US.trox.json",
+        "out/es.trox.json",
+    ] {
+        assert!(fixture.path().join(path).is_file(), "missing {path}");
+    }
+}
+
+#[test]
+fn selected_release_check_extracts_target_fallback_dependencies() {
+    let fixture = copy_fixture();
+    let config = fixture.path().join("trox.ron");
+    let config_text = fs::read_to_string(&config).unwrap().replace(
+        "locales: {\n        \"es\": (profile: \"locales/es.ron\", csv: \"locales/es.csv\", bundle: \"out/es.trox.json\"),",
+        "locales: {\n        \"es\": (profile: \"locales/es.ron\", csv: \"locales/es.csv\", bundle: \"out/es.trox.json\"),\n        \"fr\": (profile: \"locales/fr.ron\", csv: \"locales/fr.csv\", bundle: \"out/fr.trox.json\"),",
+    );
+    fs::write(&config, config_text).unwrap();
+    let es_profile = fixture.path().join("locales/es.ron");
+    let es_text = fs::read_to_string(&es_profile)
+        .unwrap()
+        .replace("fallbacks: [\"en-US\"]", "fallbacks: [\"fr\", \"en-US\"]");
+    fs::write(es_profile, es_text).unwrap();
+    fs::write(
+        fixture.path().join("locales/fr.ron"),
+        r#"(
+            locale: "fr",
+            direction: Ltr,
+            isolation: Isolate,
+            fallbacks: ["en-US"],
+            facets: {
+                "gender": (scope: Message, values: ["masculine", "feminine"]),
+            },
+            term_facets: {
+                "card-subtype.warrior": { "gender": "masculine" },
+                "card-subtype.relic": { "gender": "feminine" },
+            },
+        )"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("trox")
+        .unwrap()
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "release-check",
+            "--locale",
+            "es",
+            "--allow-missing",
+        ])
+        .assert()
+        .success();
+    assert!(fixture.path().join("locales/fr.csv").is_file());
+    assert!(fixture.path().join("locales/es.csv").is_file());
+    assert!(fixture.path().join("out/es.trox.json").is_file());
+}
+
+#[test]
 fn handoff_export_and_import_round_trip_the_current_active_catalog() {
     let fixture = copy_fixture();
     let config = fixture.path().join("trox.ron");

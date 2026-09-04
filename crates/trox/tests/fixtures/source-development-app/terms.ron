@@ -1,0 +1,8 @@
+{
+    "unit.card": (
+        value: "card",
+        forms: {
+            "counted": Number([One("card"), Other("cards")]),
+        },
+    ),
+}

@@ -3,24 +3,23 @@
 use super::*;
 use trox::NumericBranchKey;
 
+const NUMBER_FALLBACK_CONFIG: &str = r#"(
+    source_locale: "en-US",
+    terms: "terms.ron",
+    source_bundle: "bundle.json",
+    sources: [(language: Rust, include: ["**/*.rs"])],
+    locales: {},
+    term_forms: {
+        "counted": (
+            description: "A counted term.",
+            number: Required,
+            source_fallback: Default,
+        ),
+    },
+)"#;
+
 fn config_with_number_fallback() -> ProjectConfig {
-    ron::from_str(
-        r#"(
-            source_locale: "en-US",
-            terms: "terms.ron",
-            source_bundle: "bundle.json",
-            sources: [(language: Rust, include: ["**/*.rs"])],
-            locales: {},
-            term_forms: {
-                "counted": (
-                    description: "A counted term.",
-                    number: Required,
-                    source_fallback: Default,
-                ),
-            },
-        )"#,
-    )
-    .unwrap()
+    ron::from_str(NUMBER_FALLBACK_CONFIG).unwrap()
 }
 
 fn fallback_term() -> TermRecord {
@@ -28,6 +27,7 @@ fn fallback_term() -> TermRecord {
         description: None,
         value: "Card".into(),
         forms: BTreeMap::new(),
+        facets: BTreeMap::new(),
     }
 }
 
@@ -406,6 +406,7 @@ fn source_locale_categories_are_required_for_messages_and_terms() {
                 "counted".into(),
                 TermSurface::Number(vec![NumberSurface::Other("Cards".into())]),
             )]),
+            facets: BTreeMap::new(),
         },
     )]);
     let term_error = validate_term_category_completeness(&terms, &locale_data("en-US"))
@@ -456,6 +457,8 @@ txa("{noun}", tx_args![noun => counted(TermId::new("deck"), count)], "Term label
     .unwrap();
     let mut config = config_with_number_fallback();
     config.root = project.path().to_path_buf();
+    config.path = project.path().join("trox.ron");
+    fs::write(&config.path, NUMBER_FALLBACK_CONFIG).unwrap();
     let model = build_catalog(&config, &mut Diagnostics::default()).unwrap();
     assert_eq!(model.messages.len(), 1);
     assert_eq!(

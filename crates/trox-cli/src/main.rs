@@ -78,6 +78,15 @@ enum Command {
         #[arg(long, value_parser = ["warnings"])]
         deny: Option<String>,
     },
+    /// Extract, generate, and validate production artifacts for a release job.
+    ReleaseCheck {
+        #[arg(long, value_name = "LOCALE")]
+        locale: Vec<String>,
+        #[arg(long)]
+        allow_missing: bool,
+        #[arg(long, value_parser = ["warnings"])]
+        deny: Option<String>,
+    },
     /// Explicitly remove obsolete rows from locale CSVs.
     Prune {
         #[arg(long, value_name = "LOCALE")]
@@ -183,6 +192,14 @@ fn run(cli: &Cli) -> Result<()> {
             "trox.bundle",
             command_bundle(&config, locale, *allow_missing, deny.is_some(), cli.json),
         ),
+        Command::ReleaseCheck {
+            locale,
+            allow_missing,
+            deny,
+        } => (
+            "trox.release-check",
+            command_release_check(&config, locale, *allow_missing, deny.is_some(), cli.json),
+        ),
         Command::Prune { locale } => ("trox.prune", command_prune(&config, locale, cli.json)),
         Command::Locale {
             command: LocaleCommand::Init { locale },
@@ -261,29 +278,31 @@ fn command_check(
             &profile,
             &mut diagnostics,
         )?;
-        let sync = synchronize(&config.resolve(report_path), &rows, true, &mut diagnostics)?;
-        if sync.changed {
-            diagnostics.push(Diagnostic::error(
-                "trox.csv-out-of-date",
-                format!(
-                    "source report {} is out of date",
-                    config.resolve(report_path).display()
-                ),
-            ));
+        let path = config.resolve(report_path);
+        if path.exists() {
+            let sync = synchronize(&path, &rows, true, &mut diagnostics)?;
+            if sync.changed {
+                diagnostics.push(Diagnostic::error(
+                    "trox.csv-out-of-date",
+                    format!("source report {} is out of date", path.display()),
+                ));
+            }
         }
     }
     for (locale, profile) in locale_plan.profiles() {
         let rows = expand_rows(config, &model, locale, profile, &mut diagnostics)?;
         let path = config.resolve(&config.locales[locale].csv);
-        let sync = synchronize(&path, &rows, false, &mut diagnostics)?;
-        if sync.changed {
-            diagnostics.push(Diagnostic::error(
-                "trox.csv-out-of-date",
-                format!(
-                    "{} is out of date; run trox extract --locale {locale}",
-                    path.display()
-                ),
-            ));
+        if path.exists() {
+            let sync = synchronize(&path, &rows, false, &mut diagnostics)?;
+            if sync.changed {
+                diagnostics.push(Diagnostic::error(
+                    "trox.csv-out-of-date",
+                    format!(
+                        "{} is out of date; run trox extract --locale {locale}",
+                        path.display()
+                    ),
+                ));
+            }
         }
     }
     apply_lint_policy(config, deny_warnings, &mut diagnostics);
@@ -345,6 +364,27 @@ fn command_extract(
         model.terms.len(),
         model.files_scanned
     );
+    Ok(())
+}
+
+fn command_release_check(
+    config: &ProjectConfig,
+    requested: &[String],
+    allow_missing: bool,
+    deny_warnings: bool,
+    json: bool,
+) -> Result<()> {
+    let required = if requested.is_empty() {
+        vec![]
+    } else {
+        LocalePlan::load(config, requested)?
+            .profiles()
+            .map(|(locale, _)| locale.clone())
+            .collect()
+    };
+    command_extract(config, &required, deny_warnings, json)?;
+    command_bundle(config, requested, allow_missing, deny_warnings, json)?;
+    eprintln!("release artifacts generated and validated");
     Ok(())
 }
 

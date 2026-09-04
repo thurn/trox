@@ -3,8 +3,8 @@
 //! Trox separates authoring a message from rendering it. Authoring functions
 //! never consult global locale state: they build immutable [`LocalizedString`]
 //! values containing a stable identity and typed arguments. An explicit
-//! [`Localizer`] later resolves those values against validated source and target
-//! [`Bundle`]s.
+//! [`Localizer`] later resolves those values either directly in source-development
+//! mode or against validated source and target [`Bundle`]s in production.
 //!
 //! Most application code can import [`prelude`] and use [`tx`] for static text
 //! or [`txa`] with [`tx_args!`] for interpolation and selection:
@@ -22,6 +22,10 @@
 //!     "Heading for the currently open deck.",
 //! );
 //! assert!(!heading.is_atomic());
+//!
+//! let localizer = Localizer::for_source(SourceLocale::new("en-US")?)?;
+//! assert_eq!(localizer.resolve(&message), "Close deck browser");
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
 //! Serialized localized values should be decoded through a [`SourceCatalog`]
@@ -40,6 +44,7 @@ mod model;
 mod pattern;
 mod ron_adapter;
 mod runtime;
+mod source_locale;
 mod source_message;
 mod value;
 
@@ -69,6 +74,7 @@ pub use pattern::{
     opaque, ordinal, other, otherwise, plural, select, term, two, tx, tx_owned, txa, when, zero,
 };
 pub use ron_adapter::{RonPlaceholder, RonTx};
+pub use source_locale::{CLDR_VERSION, SourceLocale};
 pub use source_message::{SourceMessage, SourceMessageRef};
 pub use value::LocalizedString;
 
@@ -79,9 +85,9 @@ pub use value::LocalizedString;
 /// localization infrastructure.
 pub mod prelude {
     pub use crate::{
-        AnnotatedLocalizedString, LocalizedString, Localizer, ResolvedLocalizedPart, TermId,
-        TroxSelector, counted, exact, few, indefinite, ls, many, meaning, one, opaque, ordinal,
-        other, otherwise, plural, select, term, two, tx, tx_args, txa, when, zero,
+        AnnotatedLocalizedString, LocalizedString, Localizer, ResolvedLocalizedPart, SourceLocale,
+        TermId, TroxSelector, counted, exact, few, indefinite, ls, many, meaning, one, opaque,
+        ordinal, other, otherwise, plural, select, term, two, tx, tx_args, txa, when, zero,
     };
 }
 
