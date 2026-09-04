@@ -10,7 +10,7 @@ use crate::model::{
 use crate::value::LocalizedStringWire;
 use crate::{Argument, LocalizedString};
 
-pub(crate) const ASSERT_LOCALIZED_MEANING: &str = "trox.assert-localized";
+pub(crate) const LS_MEANING: &str = "trox.assert-localized";
 
 /// A fully owned pattern under construction.
 #[derive(Debug, Clone)]
@@ -405,13 +405,13 @@ pub fn tx_owned(
 /// Use this explicit escape hatch for migrations, raw user input, tests, and
 /// developer-only surfaces. The returned value always resolves to `raw_string`
 /// in every locale, and calls are deliberately ignored by source extraction.
-pub fn assert_localized(raw_string: impl AsRef<str>) -> LocalizedString {
+pub fn ls(raw_string: impl AsRef<str>) -> LocalizedString {
     let normalized: String = raw_string.as_ref().nfc().collect();
     let escaped = normalized.replace('{', "{{").replace('}', "}}");
     LocalizedString::build(
         IdentityDescriptor {
             identity_version: 1,
-            meaning: Some(ASSERT_LOCALIZED_MEANING.to_owned()),
+            meaning: Some(LS_MEANING.to_owned()),
             pattern: Pattern::Text { text: escaped },
         },
         BTreeMap::new(),

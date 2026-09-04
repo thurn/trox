@@ -185,7 +185,7 @@ use trox::prelude::*;
 It exports:
 
 - `LocalizedString`, `Localizer`, and `TermId`.
-- `tx`, `txa`, `meaning`, `assert_localized`, and `tx_args!`.
+- `tx`, `txa`, `meaning`, `ls`, and `tx_args!`.
 - `plural`, `ordinal`, and `select`.
 - `exact`, `zero`, `one`, `two`, `few`, `many`, and `other`.
 - `when`, `otherwise`, and `TroxSelector`.
@@ -214,12 +214,12 @@ let text: String = localizer.resolve(&value);
 
 ### Intentionally untranslated text
 
-Use `assert_localized` when runtime text is intentionally safe to display
-without translation:
+Use `ls` when runtime text is intentionally safe to display without
+translation:
 
 ```rust
 fn player_name(raw_string: &str) -> LocalizedString {
-    assert_localized(raw_string)
+    ls(raw_string)
 }
 ```
 
@@ -230,9 +230,9 @@ Appropriate uses are:
 - Tests that need a lightweight `LocalizedString` value.
 - Developer-only surfaces whose text is not translated.
 
-The function name makes the assertion explicit: this text does not need
-translation at this call site. Do not use it for ordinary user-facing product
-copy. The extractor deliberately ignores these calls, and the value resolves to
+Calling `ls` asserts that this text does not need translation at this call
+site. Do not use it for ordinary user-facing product copy. The extractor
+deliberately ignores these calls, and the value resolves to
 the supplied text in every locale, including text containing braces. Replace
 migration uses with `tx` or `txa` as localization work is completed.
 

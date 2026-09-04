@@ -9,7 +9,7 @@ use crate::model::{
     Argument, ArgumentSchema, IdentityDescriptor, IntoArgument, Pattern, SelectorRecord, Version,
     validate_argument_schemas, validate_arguments, validate_identity, validate_selectors,
 };
-use crate::pattern::ASSERT_LOCALIZED_MEANING;
+use crate::pattern::LS_MEANING;
 use crate::{SerializeError, SourceMessageRef, TroxValueError};
 
 /// Canonical serialized representation of a [`LocalizedString`].
@@ -266,7 +266,7 @@ impl LocalizedString {
     }
 
     pub(crate) fn is_asserted_localized(&self) -> bool {
-        self.data.identity.meaning.as_deref() == Some(ASSERT_LOCALIZED_MEANING)
+        self.data.identity.meaning.as_deref() == Some(LS_MEANING)
             && matches!(self.data.identity.pattern, Pattern::Text { .. })
             && self.data.arguments.is_empty()
             && self.data.ron_template_arguments.is_none()

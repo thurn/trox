@@ -235,12 +235,9 @@ tx("Yes", "Actual label.");"#,
 }
 
 #[test]
-fn ignores_assert_localized_calls() {
+fn ignores_untranslated_value_calls() {
     for (source, language) in [
-        (
-            r#"assert_localized("Not extracted {raw} text")"#,
-            Language::Rust,
-        ),
+        (r#"ls("Not extracted {raw} text")"#, Language::Rust),
         (
             r#"assertLocalized("Not extracted {raw} text")"#,
             Language::TypeScript,

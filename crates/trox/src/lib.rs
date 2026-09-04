@@ -65,9 +65,8 @@ pub fn contract_signature(
         .map_err(|error| TroxValueError::new("trox.contract", error.to_string()))
 }
 pub use pattern::{
-    PatternValue, SelectArm, TroxSelector, assert_localized, counted, exact, few, indefinite, many,
-    meaning, one, opaque, ordinal, other, otherwise, plural, select, term, two, tx, tx_owned, txa,
-    when, zero,
+    PatternValue, SelectArm, TroxSelector, counted, exact, few, indefinite, ls, many, meaning, one,
+    opaque, ordinal, other, otherwise, plural, select, term, two, tx, tx_owned, txa, when, zero,
 };
 pub use ron_adapter::{RonPlaceholder, RonTx};
 pub use source_message::{SourceMessage, SourceMessageRef};
@@ -81,8 +80,8 @@ pub use value::LocalizedString;
 pub mod prelude {
     pub use crate::{
         AnnotatedLocalizedString, LocalizedString, Localizer, ResolvedLocalizedPart, TermId,
-        TroxSelector, assert_localized, counted, exact, few, indefinite, many, meaning, one,
-        opaque, ordinal, other, otherwise, plural, select, term, two, tx, tx_args, txa, when, zero,
+        TroxSelector, counted, exact, few, indefinite, ls, many, meaning, one, opaque, ordinal,
+        other, otherwise, plural, select, term, two, tx, tx_args, txa, when, zero,
     };
 }
 

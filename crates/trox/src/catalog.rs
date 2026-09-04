@@ -91,7 +91,7 @@ impl SourceCatalog {
     ///
     /// Unknown messages, forms, and incompatible numbered-term contracts are
     /// rejected before a [`LocalizedString`] is returned. The reserved,
-    /// catalog-independent wire shape produced by [`crate::assert_localized`]
+    /// catalog-independent wire shape produced by [`crate::ls`]
     /// is the sole exception.
     pub fn localized_string_from_json(
         &self,
@@ -131,7 +131,7 @@ impl SourceCatalog {
                 "localized value contract signature mismatch".into(),
             ));
         }
-        if wire.identity.meaning.as_deref() == Some(crate::pattern::ASSERT_LOCALIZED_MEANING) {
+        if wire.identity.meaning.as_deref() == Some(crate::pattern::LS_MEANING) {
             let value = LocalizedString::build_with_known_ids(
                 wire.identity,
                 wire.arguments,
